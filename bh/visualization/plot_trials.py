@@ -237,30 +237,32 @@ def plot_single_session(trials: pd.DataFrame,
     return fig, ax
 
 
-def calc_bpos_probs(trials, err_by_mouse=True, add_agg_cols=None):
+def calc_bpos_probs(trials, add_agg_cols=None, add_cond_cols=None):
 
     agg_cols = ['Switch', 'selHigh']
-    if add_agg_cols:
+    if add_agg_cols is not None:
+        if not isinstance(add_agg_cols, list):
+            add_agg_cols = [add_agg_cols]
         agg_cols.extend(add_agg_cols)
     agg_funcs = {agg_col: np.mean for agg_col in agg_cols}
 
     # Add column tracking how far trial is from end of block.
     trials['rev_iInBlock'] = trials['iInBlock'] - trials['blockLength']
 
-    if err_by_mouse:
-        bpos_probs = (trials
-                      .groupby(['Mouse', 'iInBlock'], as_index=False)
+    grp_forward = ['iInBlock']
+    grp_rev = ['rev_iInBlock']
+    if add_cond_cols is not None:
+        if not isinstance(add_cond_cols, list):
+            add_cond_cols = [add_cond_cols]
+        grp_forward.extend(add_cond_cols)
+        grp_rev.extend(add_cond_cols)
+
+    bpos_probs = (trials
+                  .groupby(grp_forward, as_index=False)
+                  .agg(agg_funcs))
+    bpos_probs_rev = (trials
+                      .groupby(grp_rev, as_index=False)
                       .agg(agg_funcs))
-        bpos_probs_rev = (trials
-                          .groupby(['Mouse', 'rev_iInBlock'], as_index=False)
-                          .agg(agg_funcs))
-    else:
-        bpos_probs = (trials
-                      .groupby(['iInBlock'], as_index=False)
-                      .agg(agg_funcs))
-        bpos_probs_rev = (trials
-                          .groupby(['rev_iInBlock'], as_index=False)
-                          .agg(agg_funcs))
 
     # Combine negative block positions with forward-counting positions.
     bpos_probs_rev = bpos_probs_rev.rename(columns={'rev_iInBlock': 'iInBlock'})
@@ -269,25 +271,45 @@ def calc_bpos_probs(trials, err_by_mouse=True, add_agg_cols=None):
     return bpos
 
 
-def plot_bpos_behavior(bpos_df, include_units=False):
+def plot_bpos_behavior(bpos_probs,
+                       include_units: str = '',
+                       plot_features: dict = None):
 
-    fig, axs = plt.subplots(ncols=2, figsize=(7.8, 2.4))
+    if plot_features is None:
+        plot_features = {'selHigh': ('P(high port)', (0, 1)),
+                         'Switch': ('P(switch)', (0, 0.4))}
 
-    plot_features = {'selHigh': 'P(high port)',
-                     'Switch': 'P(switch)'}
+    n_plots = len(plot_features.keys())
+    fig, axs = plt.subplots(ncols=n_plots, figsize=(3.6 * n_plots, 2.4))
 
-    for i, (metric, label) in enumerate(plot_features.items()):
+    for i, (metric, ax_vars) in enumerate(plot_features.items()):
         if include_units:
-            sns.lineplot(bpos_df, x='iInBlock', y=metric, units='Mouse', estimator=None, ax=axs[i],
-                         color='k', lw=0.6, label='single mouse')
-        sns.lineplot(bpos_df, x='iInBlock', y=metric, ax=axs[i], color='k', lw=2., label='pooled mice')
+            sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i],
+                         color='k', units=include_units, estimator=None,
+                         lw=0.6, label=include_units)
+        sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i], color='k',
+                     lw=2, label='pooled')
+
+        label, ylim = ax_vars
         axs[i].vlines(x=0, ymin=-1, ymax=1.5, ls='--', color='k', zorder=0)
-        axs[i].set(xlabel='block position', xlim=(-10, 10), ylabel=label, ylim=(0, 1))
-        
-        axs[1].set(ylim=(0, 0.4))
-        sns.despine()
-        axs[0].legend().remove()
-    axs[1].legend(bbox_to_anchor=(1, 1), edgecolor='white')
+        axs[i].set(xlabel='block position', xlim=(-10, 10),
+                   ylabel=label, ylim=ylim)
+
+    sns.despine()
+    axs[0].legend().remove()
+    axs[-1].legend(bbox_to_anchor=(1, 1), edgecolor='white')
+    check_leg_duplicates(axs[-1])
+
+
     plt.tight_layout()
 
     return fig, axs
+
+
+def check_leg_duplicates(ax):
+
+    h, l = ax.get_legend_handles_labels()
+    legend_reduced = dict(zip(l, h))
+    ax.legend(legend_reduced.values(), legend_reduced.keys(),
+              bbox_to_anchor=(0.8, 1), edgecolor='white')
+    plt.tight_layout()
