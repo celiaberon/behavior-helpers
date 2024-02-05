@@ -139,11 +139,27 @@ def plot_sequences(cond_probs: pd.DataFrame,
     return fig, ax
 
 
-def plot_sequence_points(cond_probs,
+def plot_sequence_points(cond_probs: pd.DataFrame,
                          yval: str = 'pevent',
                          fig=None,
                          ax=None,
                          **kwargs):
+
+    '''
+    Swarmplot representation of conditional probabilities.
+    Args:
+        cond_probs:
+            Table of conditional probabilities.
+        yval:
+            Column containing dependent variable.
+        fig:
+            Matplotlib figure object if overlaying on existing figure.
+        ax:
+            Matplotlib axis object if overlaying on existing axis.
+    Returns:
+        fig, ax:
+            Matplotlib figure objects containing plot.
+    '''
 
     if ax is None:
         if cond_probs.history.nunique() < 10:
@@ -151,8 +167,11 @@ def plot_sequence_points(cond_probs,
         else:
             fig, ax = plt.subplots(figsize=(10, 2.5))
 
-    sns.swarmplot(data=cond_probs, x='history', y=yval, ax=ax,
-                  hue=kwargs.get('grp', 'history'), palette='Blues', size=5)
+    hue_grp = kwargs.get('grp', 'history')
+
+    sns.swarmplot(data=cond_probs.sort_values(by=hue_grp), x='history', y=yval,
+                  ax=ax, size=3, hue=hue_grp,
+                  palette=kwargs.get('pal', 'Blues'))
 
     ax.legend(bbox_to_anchor=(1, 1), loc='upper left', frameon=False)
     return fig, ax
@@ -237,7 +256,28 @@ def plot_single_session(trials: pd.DataFrame,
     return fig, ax
 
 
-def calc_bpos_probs(trials, add_agg_cols=None, add_cond_cols=None):
+def calc_bpos_probs(trials: pd.DataFrame,
+                    add_agg_cols: list | str = None,
+                    add_cond_cols: list | str = None) -> pd.DataFrame:
+
+    '''
+    Calculate probabilities of events conditioned on relative trial position
+    in a block. Block transitions occur at `iInBlock` = 0.
+    Args:
+        trials:
+            Trial-based data.
+        add_agg_cols:
+            Additional columns to calculate conditional probabilities for.
+            Defaults to only calculating for Switch and High Port probability.
+        add_cond_cols:
+            Additional columns on which to condition probabilities. Defaults
+            to only conditioning on block position.
+    Returns:
+        bpos:
+            Dataframe containing P(agg_cols | cond_cols) for each trial in a
+            block as `iInBlock` relative to block transitions at 0. Negative
+            iInBlock corresponds to trial position relative to next transition.
+    '''
 
     agg_cols = ['Switch', 'selHigh']
     if add_agg_cols is not None:
@@ -266,14 +306,33 @@ def calc_bpos_probs(trials, add_agg_cols=None, add_cond_cols=None):
 
     # Combine negative block positions with forward-counting positions.
     bpos_probs_rev = bpos_probs_rev.rename(columns={'rev_iInBlock': 'iInBlock'})
-    bpos = pd.concat((bpos_probs_rev, bpos_probs)).sort_values(by='iInBlock')
+    bpos = (pd.concat((bpos_probs_rev, bpos_probs))
+            .sort_values(by='iInBlock')
+            .reset_index(drop=True))
 
     return bpos
 
 
-def plot_bpos_behavior(bpos_probs,
+def plot_bpos_behavior(bpos_probs: pd.DataFrame,
                        include_units: str = '',
                        plot_features: dict = None):
+
+    '''
+    Plot mean probabilities relative to block transitions.
+    Args:
+        bpos_probs:
+            Probabilities of events conditioned on relative trial position in
+            block.
+        include_units:
+            Whether and which "units" (individual traces) to include alongside
+            pooled trace.
+        plot_features:
+            Key, value pairs as (metric: (x-axis label, y-axis limits) for
+            each subplot to include.
+    Returns:
+        figs, axs:
+            Matplotlib objects containing plots.
+    '''
 
     if plot_features is None:
         plot_features = {'selHigh': ('P(high port)', (0, 1)),
@@ -299,8 +358,6 @@ def plot_bpos_behavior(bpos_probs,
     axs[0].legend().remove()
     axs[-1].legend(bbox_to_anchor=(1, 1), edgecolor='white')
     check_leg_duplicates(axs[-1])
-
-
     plt.tight_layout()
 
     return fig, axs
