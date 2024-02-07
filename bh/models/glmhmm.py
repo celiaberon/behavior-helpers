@@ -11,7 +11,7 @@ from ssm.model_selection import cross_val_scores
 sys.path.append(f'{os.path.expanduser("~")}/GitHub/neural-timeseries-analysis/')
 from nta.features import behavior_features as bf
 
-from bh.utils import calc_ci, calc_sem
+from bh.utils import calc_ci, calc_sem, make_onehot_array
 
 
 class GLMHMM:
@@ -159,7 +159,7 @@ class GLMHMM:
         ax.set(xlabel="Number of states", ylabel="Log Probability",
                title="Cross Validation Scores with 95% CIs")
 
-    def compare_k_states_no_err(self, scores, ylab='', datasets=['train', 'test']):
+    def compare_k_states_no_err(self, scores, ylab='', datasets=['train', 'test'], **kwargs):
 
         fig, ax = plt.subplots(figsize=(4, 3), dpi=80)
 
@@ -168,10 +168,11 @@ class GLMHMM:
 
         plt.legend(bbox_to_anchor=(1, 1))
         ax.set(xlabel="Number of states", ylabel=ylab)
+        if ylim := kwargs.get('ylim', False):
+            plt.ylim(ylim)
         sns.despine()
 
     def calc_log_likelihood(self, verbose=False, normalize=False, as_bits=False):
-
 
         assert sum((normalize, as_bits)) < 2, 'cannot normalize and compute bits together'
         denom_train = self.train_num_trials if normalize else 1
@@ -252,14 +253,20 @@ class GLMHMM:
         if accuracy:
             return acc
 
-    def plot_state_probs(self, model_idx, num_trials: int = None):
+    def plot_state_probs(self, model_idx, num_trials: int = None,
+                         as_occupancy: bool = False):
+
+        if as_occupancy:
+            samples = self.test_occupancy[model_idx]
+        else:
+            samples = self.test_states[model_idx]
 
         if num_trials is None:
-            num_trials = len(self.train_states[model_idx])
+            num_trials = len(samples)
 
         fig, ax = plt.subplots(figsize=(6, 3))
         for i in range(model_idx+1):
-            plt.plot(self.train_states[model_idx][:, i][:num_trials], label=i)
+            plt.plot(samples[:, i][:num_trials], label=i, alpha=0.8)
         ax.set(xlabel='trial', ylabel='prob')
         plt.legend(bbox_to_anchor=(1, 1), title='latent state')
         sns.despine()
@@ -310,3 +317,25 @@ class GLMHMM:
         plt.xticks(plot_states - 1, plot_states, fontsize=10)
         plt.yticks(plot_states - 1, plot_states, fontsize=10)
         plt.tight_layout()
+
+    def pred_occupancy(self):
+
+        self.train_occupancy = []
+        self.test_occupancy = []
+        self.train_occupancy_rates = []
+        self.test_occupancy_rates = []
+        for i in self.model:
+            state_max_posterior = np.argmax(self.train_states[i], axis=1)
+            state_occupancies = np.unique(state_max_posterior,
+                                          return_counts=True)[1].astype('float')
+            state_occupancies /= np.sum(state_occupancies)
+
+            self.train_occupancy.append(make_onehot_array(state_max_posterior))
+            self.train_occupancy_rates.append(state_occupancies)
+
+            state_max_posterior = np.argmax(self.test_states[i], axis=1)
+            state_occupancies = np.unique(state_max_posterior,
+                                          return_counts=True)[1].astype('float')
+            state_occupancies /= np.sum(state_occupancies)
+            self.test_occupancy.append(make_onehot_array(state_max_posterior))
+            self.test_occupancy_rates.append(state_occupancies)

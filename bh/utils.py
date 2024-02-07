@@ -19,3 +19,14 @@ def calc_ci(x, confidence: float = 0.95):
     ci_low = np.mean(x) - err_width
     ci_high = np.mean(x) + err_width
     return (ci_low, ci_high, err_width)
+
+
+def make_onehot_array(x):
+
+    print(len(np.unique(x)))
+    if len(np.unique(x)) == 1:
+        return x
+
+    onehot = np.zeros((x.size, x.max() + 1))
+    onehot[np.arange(x.size), x] = 1
+    return onehot
