@@ -1,5 +1,6 @@
 import os
 import sys
+from abc import ABC, abstractmethod
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,24 +15,10 @@ from nta.features import behavior_features as bf
 from bh.utils import calc_ci, calc_sem, make_onehot_array
 
 
-class GLMHMM:
+class ModelData(ABC):
 
-    def __init__(self,
-                 num_states,
-                 obs_dim: int = 1,
-                 num_cat: int = 2,
-                 C: int = 2,
-                 prior_sigma: int = None,
-                 prior_alpha: int = None):
-        
-        self.num_states = np.array(num_states)
-        self.obs_dim = obs_dim  # number of observed dimensions, 1 for just reward, 2 if you had something like reaction time
-        self.num_cat = num_cat  # number of categories for the output
-        self.C = C  # number of classes for prediction?
-
-        # Priors on the weights.
-        self.prior_sigma = prior_sigma
-        self.prior_alpha = prior_alpha
+    def __init__(self):
+        pass
 
     def drop_nans(self):
         pass
@@ -39,14 +26,14 @@ class GLMHMM:
     def prepare_features(self, trials, yvar, feat_funcs=None, nlags=3):
 
         self.nlags = nlags
-        
+
         def pm1(x):
             return 2 * x - 1
         if feat_funcs is None:
             feat_funcs = {'Reward': lambda r, c: r,
-                          'direction': lambda r, c: pm1(c),
-                          'dir-rew': lambda r, c: r * pm1(c)
-                          }
+                            'direction': lambda r, c: pm1(c),
+                            'dir-rew': lambda r, c: r * pm1(c)
+                            }
 
         initial_cols = [col for col in feat_funcs if col in trials.columns]
         trials_clean = trials.dropna(subset=['Reward', 'direction'])
@@ -78,8 +65,8 @@ class GLMHMM:
 
         # Assign session ids to train and test splits
         train_ids, test_ids = train_test_split(self.X['Session'].unique(),
-                                               train_size=ptrain,
-                                               random_state=seed)
+                                                train_size=ptrain,
+                                                random_state=seed)
 
         if verbose:
             print(f'{len(train_ids)} training sessions and {len(test_ids)} test sessions')
@@ -91,28 +78,69 @@ class GLMHMM:
         self.test_num_sess = len(test_ids)
 
         # Split data into train and test sets
-        self.train_X = (self.X.query('Session.isin(@train_ids)')
-                        .drop(columns=['Session'])
-                        .to_numpy())
-        self.train_y = (self.y.query('Session.isin(@train_ids)')
-                        .drop(columns=['Session'])
-                        .to_numpy()
-                        .reshape(-1, 1)
-                        .astype(int))
-        self.test_X = (self.X.query('Session.isin(@test_ids)')
-                       .drop(columns=['Session'])
-                       .to_numpy())
-        self.test_y = (self.y.query('Session.isin(@test_ids)')
-                       .drop(columns=['Session'])
-                       .to_numpy()
-                       .reshape(-1, 1)
-                       .astype(int))
-        self.train_num_trials = len(self.train_X)
-        self.test_num_trials = len(self.test_X)
+        train_X = (self.X.copy()
+                   .query('Session.isin(@train_ids)')
+                   .reset_index(drop=True))
+        self.train_num_trials = len(train_X)
 
-        self.input_dim = self.train_X.shape[1]
+        session_starts = train_X.groupby('Session').nth(0).index.values
+        session_starts = np.concatenate((session_starts, [len(train_X)]))
+        train_X = train_X.drop(columns=['Session'])
+        self.train_X = [train_X.loc[start:stop].to_numpy()
+                        for start, stop in zip(session_starts, session_starts[1:])]
+        train_y = (self.y.copy()
+                   .query('Session.isin(@train_ids)')
+                   .drop(columns=['Session'])
+                   .reset_index(drop=True))
+        assert len(train_y) == self.train_num_trials, 'Different number of trials in train X and y'
+        self.train_y = [train_y.loc[start:stop].to_numpy().reshape(-1, 1).astype('int')
+                        for start, stop in zip(session_starts, session_starts[1:])]
+        assert len(self.train_y) == len(self.train_X), 'Different number of sessions in train X and y'
 
-    def init_model(self, **kwargs):
+        test_X = (self.X.copy()
+                  .query('Session.isin(@test_ids)')
+                  .reset_index(drop=True))
+        self.test_num_trials = len(test_X)
+
+        session_starts = test_X.groupby('Session').nth(0).index.values
+        session_starts = np.concatenate((session_starts, [len(test_X)]))
+        test_X = test_X.drop(columns=['Session'])
+        self.test_X = [test_X.loc[start:stop].to_numpy()
+                        for start, stop in zip(session_starts, session_starts[1:])]
+        test_y = (self.y.copy()
+                  .query('Session.isin(@test_ids)')
+                  .drop(columns=['Session'])
+                  .reset_index(drop=True))
+        assert len(test_y) == self.test_num_trials, 'Different number of trials in test X and y'
+        self.test_y = [test_y.loc[start:stop].to_numpy().reshape(-1, 1).astype('int')
+                        for start, stop in zip(session_starts, session_starts[1:])]
+        assert len(self.test_y) == len(self.test_X), 'Different number of sessions in test X and y'
+        self.input_dim = self.train_X[0].shape[1]
+
+
+class GLMHMM(ModelData):
+
+    def __init__(self,
+                 num_states,
+                 obs_dim: int = 1,
+                 num_cat: int = 2,
+                #  C: int = 2,
+                 obs_kwargs: dict = None,
+                 observations: str = 'input_driven_obs',
+                 transitions: str = 'standard',
+                 trans_kwargs: dict = None):
+
+        super().__init__()
+
+        self.num_states = np.array(num_states)
+        self.obs_dim = obs_dim  # number of observed dimensions, (e.g. reward, reaction time)
+
+        self.observation_kwargs = obs_kwargs
+        self.observations = observations
+        self.transitions = transitions
+        self.transition_kwargs = trans_kwargs
+
+    def init_model(self):
 
         self.model = {}
         for i, k in enumerate(self.num_states):
@@ -120,11 +148,10 @@ class GLMHMM:
             self.model[i] = ssm.HMM(k,
                                     self.obs_dim,
                                     self.input_dim,
-                                    observations="input_driven_obs",
-                                    observation_kwargs={
-                                        'C': self.num_cat,
-                                        'prior_sigma': self.prior_sigma},
-                                    **kwargs
+                                    observations=self.observations,
+                                    observation_kwargs=self.observation_kwargs,
+                                    transitions=self.transitions,
+                                    transition_kwargs=self.transition_kwargs
                                 )
 
     def fit_cv(self, n_iters=200, pval=0.1, reps=3):
@@ -132,12 +159,15 @@ class GLMHMM:
         lls = []
         scores = {'train': [], 'test': []}
         for i in self.model:
-
             train_scores, test_scores = cross_val_scores(self.model[i],
                                                          self.train_y,
                                                          self.train_X,
-                                                         heldout_frac=pval, n_repeats=reps, verbose=True)
-            ll = self.model[i].fit(self.train_y, inputs=self.train_X, method="em", num_iters=n_iters, initialize=False)
+                                                         heldout_frac=pval,
+                                                         n_repeats=reps,
+                                                         verbose=True)
+            ll = self.model[i].fit(self.train_y, inputs=self.train_X,
+                                   method="em", num_iters=n_iters,
+                                   initialize=False)
             scores['train'].append(train_scores)
             scores['test'].append(test_scores)
             lls.append(ll)
@@ -148,7 +178,6 @@ class GLMHMM:
 
         # plot train and test scores for each model and display confidence intervals
         fig, ax = plt.subplots(figsize=(4, 3), dpi=80)
-
         for key in datasets:
             plt.scatter(self.num_states, [np.mean(s) for s in scores[key]],
                         label=key)
@@ -172,19 +201,21 @@ class GLMHMM:
             plt.ylim(ylim)
         sns.despine()
 
-    def calc_log_likelihood(self, verbose=False, normalize=False, as_bits=False):
+    def calc_log_likelihood(self, verbose=False, normalize=False,
+                            as_bits=False):
 
         assert sum((normalize, as_bits)) < 2, 'cannot normalize and compute bits together'
         denom_train = self.train_num_trials if normalize else 1
         denom_test = self.test_num_trials if normalize else 1
-
+        # print(f'{denom_train =} \n{denom_test=}')
         LL = {'train': np.zeros(len(self.num_states)),
               'test': np.zeros(len(self.num_states))}
         for i, model in self.model.items():
             ll_train = (model.log_likelihood(self.train_y, inputs=self.train_X)
                         / denom_train)
             if as_bits:
-                ll0 = np.log(0.5) * self.train_num_trials
+                ll0 = (self.model[0].log_likelihood(self.train_y, inputs=self.train_X)
+                        / denom_train)
                 denom = np.log(2) * self.train_num_trials
                 ll_train = (ll_train - ll0) / denom
             LL['train'][i] = ll_train
@@ -193,14 +224,15 @@ class GLMHMM:
                        / denom_test)
 
             if as_bits:
-                ll0 = np.log(0.5) * self.test_num_trials
+                ll0 = (self.model[0].log_likelihood(self.test_y, inputs=self.test_X)
+                        / denom_test)
                 denom = np.log(2) * self.test_num_trials
                 ll_test = (ll_test - ll0) / denom
             LL['test'][i] = ll_test
             if verbose:
                 print((f'Model with {i} states:'
-                       f'\n{"":>5}{"train LL":<8} = {LL["train"][-1]:.2f}'
-                       f'\n{"":>5}{"test LL":<8} = {LL["test"][-1]:.2f}'))
+                       f'\n{"":>5}{"train LL":<8} = {LL["train"][i]:.2f}'
+                       f'\n{"":>5}{"test LL":<8} = {LL["test"][i]:.2f}'))
 
         return LL
 
@@ -222,8 +254,39 @@ class GLMHMM:
         # self.pchoice = []
 
         for i, model in self.model.items():
-            self.train_states.append(model.expected_states(self.train_y, self.train_X)[0])
-            self.test_states.append(model.expected_states(self.test_y, self.test_X)[0])
+            self.train_states.append([model.expected_states(y, X)[0]
+                                     for y, X in zip(self.train_y, self.train_X)])
+            self.test_states.append([model.expected_states(y, X)[0]
+                                     for y, X in zip(self.test_y, self.test_X)])
+
+    def pred_occupancy(self):
+
+        self.train_occupancy = []
+        self.test_occupancy = []
+        self.train_occupancy_rates = []
+        self.test_occupancy_rates = []
+        for i in self.model:
+            # posteriors = np.concatenate(self.train_states[i], axis=0)
+            state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.train_states[i]]
+            state_occupancies = np.zeros((i+1, len(self.train_states[i])))
+            for idx_sess, max_post in enumerate(state_max_posterior):
+                idx, count = np.unique(max_post, return_counts=True)
+                state_occupancies[idx, idx_sess] = count.astype('float')
+
+            state_occupancies = state_occupancies.sum(axis=1) / state_occupancies.sum()
+            self.train_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
+            self.train_occupancy_rates.append(state_occupancies)
+    
+            # posteriors = np.concatenate(self.test_states[i], axis=0)
+            state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.test_states[i]]
+            state_occupancies = np.zeros((i+1, len(self.test_states[i])))
+            for idx_sess, max_post in enumerate(state_max_posterior):
+                idx, count = np.unique(max_post, return_counts=True)
+                state_occupancies[idx, idx_sess] = count.astype('float')
+
+            state_occupancies = state_occupancies.sum(axis=1) / state_occupancies.sum()
+            self.test_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
+            self.test_occupancy_rates.append(state_occupancies)
 
     def predict_choice(self, accuracy=True, verbose=False):
 
@@ -234,18 +297,20 @@ class GLMHMM:
             glm_weights = -model.observations.params
             permutation = np.argsort(glm_weights[:, 0, 0])
 
-            pred_states = self.test_states[i]
+            pred_states = np.concatenate(self.test_states[i], axis=0)
             posterior_probs = pred_states[:, permutation]
-            pright = np.exp(model.observations.calculate_logits(input=self.test_X))[:, :, 1]
+            pright = [np.exp(model.observations.calculate_logits(input=X))
+                      for X in self.test_X]
 
             # Now multiply posterior probs and prob_right and sum over latent axis.
+            pright = np.concatenate(pright, axis=0)[:, :, 1]
             pright = np.sum(np.multiply(posterior_probs, pright), axis=1)
 
             # Get the predicted label for each time step.
             pred_choice = np.around(pright, decimals=0).astype('int')
             self.pchoice.append(pred_choice)
             if accuracy:
-                pred_accuracy = np.mean(self.test_y[:, 0] == pred_choice)
+                pred_accuracy = np.mean(np.concatenate(self.test_y, axis=0)[:, 0] == pred_choice)
 
                 if verbose:
                     print(f'Model with {i} state(s) has a test predictive accuracy of {pred_accuracy}')
@@ -253,20 +318,18 @@ class GLMHMM:
         if accuracy:
             return acc
 
-    def plot_state_probs(self, model_idx, num_trials: int = None,
+
+    def plot_state_probs(self, model_idx, sess_idx: int = 0,
                          as_occupancy: bool = False):
 
         if as_occupancy:
-            samples = self.test_occupancy[model_idx]
+            samples = self.test_occupancy[model_idx][sess_idx]
         else:
-            samples = self.test_states[model_idx]
-
-        if num_trials is None:
-            num_trials = len(samples)
+            samples = self.test_states[model_idx][sess_idx]
 
         fig, ax = plt.subplots(figsize=(6, 3))
-        for i in range(model_idx+1):
-            plt.plot(samples[:, i][:num_trials], label=i, alpha=0.8)
+        for i in range(model_idx + 1):
+            plt.plot(samples[:, i], label=i, alpha=0.8)
         ax.set(xlabel='trial', ylabel='prob')
         plt.legend(bbox_to_anchor=(1, 1), title='latent state')
         sns.despine()
@@ -290,6 +353,7 @@ class GLMHMM:
                          label=f'State {k + 1}' if grp==0 else None, 
                          lw=2, marker='o', markersize=5, color=c.get(k))
 
+        ax.hlines(xmin=-1, xmax=len(self.features) + 1, y=0, color='k', lw=1)
         ax.legend(bbox_to_anchor=(1, 1), frameon=False)
         ax.set(xlabel='Features', xlim=(0, len(self.features)),
                ylabel='GLM weight', )
@@ -318,24 +382,3 @@ class GLMHMM:
         plt.yticks(plot_states - 1, plot_states, fontsize=10)
         plt.tight_layout()
 
-    def pred_occupancy(self):
-
-        self.train_occupancy = []
-        self.test_occupancy = []
-        self.train_occupancy_rates = []
-        self.test_occupancy_rates = []
-        for i in self.model:
-            state_max_posterior = np.argmax(self.train_states[i], axis=1)
-            state_occupancies = np.unique(state_max_posterior,
-                                          return_counts=True)[1].astype('float')
-            state_occupancies /= np.sum(state_occupancies)
-
-            self.train_occupancy.append(make_onehot_array(state_max_posterior))
-            self.train_occupancy_rates.append(state_occupancies)
-
-            state_max_posterior = np.argmax(self.test_states[i], axis=1)
-            state_occupancies = np.unique(state_max_posterior,
-                                          return_counts=True)[1].astype('float')
-            state_occupancies /= np.sum(state_occupancies)
-            self.test_occupancy.append(make_onehot_array(state_max_posterior))
-            self.test_occupancy_rates.append(state_occupancies)
