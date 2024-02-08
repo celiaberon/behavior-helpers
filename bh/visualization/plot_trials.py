@@ -72,13 +72,20 @@ def calc_conditional_probs(trials: pd.DataFrame,
     else:
         raise NotImplementedError
 
+    cond_probs = cond_probs.fillna(0)
+
     if sortby == 'pevent':
         cond_probs = cond_probs.sort_values(by='pevent')
     elif sortby == 'history':
         horder = kwargs.get('order', None)
-        cond_probs.history = cond_probs.history.astype('category')
-        cond_probs['history'] = cond_probs['history'].cat.set_categories(horder)
-        cond_probs = cond_probs.sort_values(by='history')
+        cond_probs_all_histories = pd.DataFrame(data={'history': horder})
+        for col in cond_probs.columns:
+            if col == 'history': continue
+            cond_probs_all_histories[col] = cond_probs_all_histories['history'].map(cond_probs.set_index('history')[col])
+        cond_probs = cond_probs_all_histories.copy()
+        # cond_probs.history = cond_probs.history.astype('category')
+        # cond_probs['history'] = cond_probs['history'].cat.set_categories(horder)
+        # cond_probs = cond_probs.sort_values(by='history')
 
     return cond_probs
 
