@@ -271,24 +271,25 @@ class GLMHMM(ModelData):
 
     def pred_occupancy(self):
 
+        self.train_max_prob_state = []
+        self.test_max_prob_state = []
         self.train_occupancy = []
         self.test_occupancy = []
         self.train_occupancy_rates = []
         self.test_occupancy_rates = []
         for i in self.model:
-            # posteriors = np.concatenate(self.train_states[i], axis=0)
             state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.train_states[i]]
-            print(len(state_max_posterior))
+
             state_occupancies = np.zeros((i+1, len(self.train_states[i])))
             for idx_sess, max_post in enumerate(state_max_posterior):
                 idx, count = np.unique(max_post, return_counts=True)
                 state_occupancies[idx, idx_sess] = count.astype('float')
 
             state_occupancies = state_occupancies.sum(axis=1) / state_occupancies.sum()
+            self.train_max_prob_state.append(state_max_posterior)
             self.train_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
             self.train_occupancy_rates.append(state_occupancies)
     
-            # posteriors = np.concatenate(self.test_states[i], axis=0)
             state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.test_states[i]]
             state_occupancies = np.zeros((i+1, len(self.test_states[i])))
             for idx_sess, max_post in enumerate(state_max_posterior):
@@ -296,6 +297,7 @@ class GLMHMM(ModelData):
                 state_occupancies[idx, idx_sess] = count.astype('float')
 
             state_occupancies = state_occupancies.sum(axis=1) / state_occupancies.sum()
+            self.test_max_prob_state.append(state_max_posterior)
             self.test_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
             self.test_occupancy_rates.append(state_occupancies)
 
