@@ -31,15 +31,15 @@ class ModelData(ABC):
             return 2 * x - 1
         if feat_funcs is None:
             feat_funcs = {'Reward': lambda r, c: r,
-                            'direction': lambda r, c: pm1(c),
-                            'dir-rew': lambda r, c: r * pm1(c)
-                            }
+                          'direction': lambda r, c: pm1(c),
+                          'dir-rew': lambda r, c: r * pm1(c)
+                          }
 
         initial_cols = [col for col in feat_funcs if col in trials.columns]
         trials_clean = trials.dropna(subset=['Reward', 'direction'])
 
-        self.y = trials_clean[[yvar, 'Session']].copy()
-        self.X = trials_clean[initial_cols + ['Session']].copy()
+        self.y = trials_clean[[yvar, 'Session', 'nTrial']].copy()
+        self.X = trials_clean[initial_cols + ['Session', 'nTrial']].copy()
 
         # Forward and backward shifts that can be useful (need to shift up front).
         for feature, func in feat_funcs.items():
@@ -61,12 +61,36 @@ class ModelData(ABC):
         self.X = self.X.drop(columns=list(feat_funcs.keys()))
         self.features = self.X.columns.drop('Session').values
 
+    def get_data_subset(self, dataset='X', col='Session', vals=None):
+
+        if dataset == 'X':
+            return self.X.copy().query(f'{col}.isin(@vals)').reset_index(drop=True)
+
+        else:
+            return self.y.copy().query(f'{col}.isin(@vals)').reset_index(drop=True)
+
+    def iter_by_session(self, X, y):
+
+        session_starts = X.groupby('Session').nth(0).index.values
+        session_starts = np.concatenate((session_starts, [len(X)]))
+        trial_ids = [X.loc[start:stop].nTrial.values
+                     for start, stop in zip(session_starts, session_starts[1:])]
+        X = X.drop(columns=['Session', 'nTrial'])
+        y = y.drop(columns=['Session', 'nTrial'])
+
+        X_by_sess = [X.loc[start:stop].to_numpy()
+                     for start, stop in zip(session_starts, session_starts[1:])]
+        y_by_sess = [y.loc[start:stop].to_numpy().reshape(-1, 1).astype('int')
+                     for start, stop in zip(session_starts, session_starts[1:])]
+
+        return X_by_sess, y_by_sess, trial_ids
+
     def split_data(self, ptrain=0.8, seed=0, verbose=False):
 
         # Assign session ids to train and test splits
         train_ids, test_ids = train_test_split(self.X['Session'].unique(),
-                                                train_size=ptrain,
-                                                random_state=seed)
+                                               train_size=ptrain,
+                                               random_state=seed)
 
         if verbose:
             print(f'{len(train_ids)} training sessions and {len(test_ids)} test sessions')
@@ -78,43 +102,29 @@ class ModelData(ABC):
         self.test_num_sess = len(test_ids)
 
         # Split data into train and test sets
-        train_X = (self.X.copy()
-                   .query('Session.isin(@train_ids)')
-                   .reset_index(drop=True))
+        train_X = self.get_data_subset(dataset='X', col='Session',
+                                       vals=train_ids)
+        train_y = self.get_data_subset(dataset='y', col='Session',
+                                       vals=train_ids)
         self.train_num_trials = len(train_X)
+        assert len(train_y) == self.train_num_trials, (
+            'Different number of trials in train X and y')
 
-        session_starts = train_X.groupby('Session').nth(0).index.values
-        session_starts = np.concatenate((session_starts, [len(train_X)]))
-        train_X = train_X.drop(columns=['Session'])
-        self.train_X = [train_X.loc[start:stop].to_numpy()
-                        for start, stop in zip(session_starts, session_starts[1:])]
-        train_y = (self.y.copy()
-                   .query('Session.isin(@train_ids)')
-                   .drop(columns=['Session'])
-                   .reset_index(drop=True))
-        assert len(train_y) == self.train_num_trials, 'Different number of trials in train X and y'
-        self.train_y = [train_y.loc[start:stop].to_numpy().reshape(-1, 1).astype('int')
-                        for start, stop in zip(session_starts, session_starts[1:])]
-        assert len(self.train_y) == len(self.train_X), 'Different number of sessions in train X and y'
+        self.train_X, self.train_y, self.train_trials = self.iter_by_session(train_X, train_y)
+        assert len(self.train_y) == len(self.train_X), (
+            'Different number of sessions in train X and y')
 
-        test_X = (self.X.copy()
-                  .query('Session.isin(@test_ids)')
-                  .reset_index(drop=True))
+        test_X = self.get_data_subset(dataset='X', col='Session',
+                                      vals=test_ids)
+        test_y = self.get_data_subset(dataset='y', col='Session',
+                                      vals=test_ids)
         self.test_num_trials = len(test_X)
+        assert len(test_y) == self.test_num_trials, (
+            'Different number of trials in test X and y')
 
-        session_starts = test_X.groupby('Session').nth(0).index.values
-        session_starts = np.concatenate((session_starts, [len(test_X)]))
-        test_X = test_X.drop(columns=['Session'])
-        self.test_X = [test_X.loc[start:stop].to_numpy()
-                        for start, stop in zip(session_starts, session_starts[1:])]
-        test_y = (self.y.copy()
-                  .query('Session.isin(@test_ids)')
-                  .drop(columns=['Session'])
-                  .reset_index(drop=True))
-        assert len(test_y) == self.test_num_trials, 'Different number of trials in test X and y'
-        self.test_y = [test_y.loc[start:stop].to_numpy().reshape(-1, 1).astype('int')
-                        for start, stop in zip(session_starts, session_starts[1:])]
-        assert len(self.test_y) == len(self.test_X), 'Different number of sessions in test X and y'
+        self.test_X, self.test_y, self.test_trials = self.iter_by_session(test_X, test_y)
+        assert len(self.test_y) == len(self.test_X), (
+            'Different number of sessions in test X and y')
         self.input_dim = self.train_X[0].shape[1]
 
 
@@ -268,6 +278,7 @@ class GLMHMM(ModelData):
         for i in self.model:
             # posteriors = np.concatenate(self.train_states[i], axis=0)
             state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.train_states[i]]
+            print(len(state_max_posterior))
             state_occupancies = np.zeros((i+1, len(self.train_states[i])))
             for idx_sess, max_post in enumerate(state_max_posterior):
                 idx, count = np.unique(max_post, return_counts=True)
