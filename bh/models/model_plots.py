@@ -1,7 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from bh.utils import calc_ci, calc_sem, make_onehot_array
+from bh.utils import calc_ci, calc_sem, make_onehot_array, get_dict_item_by_idx
+import plotly.express as px
+import plotly.graph_objects as go
+# from plotly.subplots import make_subplots
 
 def get_attribute(model, metric, dataset='test'):
 
@@ -48,47 +51,46 @@ def get_multi_mice_metrics(models, metric, **kwargs):
     return mice_metrics
 
 
-def get_dict_item_by_idx(d, idx):
-
-    for i, (k, v) in enumerate(d.items()):
-        if i == idx:
-            return k, v
-
-
 def plot_glm_weights(model, num_states,
                      with_tmat=True):
     
-    
+    from matplotlib.gridspec import GridSpec
     multi_mice = False
     if isinstance(model, dict):
         multi_mice = True
+        n_rows = num_states
+        state_iter = range(num_states)
+    else:
+        n_rows = 1
+        state_iter = range(1, num_states+1) if isinstance(num_states, int) else num_states
     
     if with_tmat:
-        fig, axs = plt.subplots(ncols=2, nrows=num_states if multi_mice else 1, figsize=(9, 3 * (multi_mice * 2)), dpi=80, width_ratios=(1, 1))
-        plot_tmat(model, num_states, ax=axs[0, 1] if multi_mice else axs[1])
+        fig = plt.figure(layout='constrained', figsize=(7, (1.5 * n_rows)+0.5))
+        gs = GridSpec(ncols=3, nrows=n_rows, figure=fig)
+        weight_ax = [fig.add_subplot(gs[i, :2]) for i in range(n_rows)]
         if multi_mice:
-            ax = axs[:,0].flatten() 
-            [ax_.axis('off') for ax_ in axs[1:, 1]]
+            tmat_ax = fig.add_subplot(gs[:, -1])
         else:
-            axs[0]
+            tmat_ax = fig.add_subplot(gs[0, -1])
+        ax = weight_ax#[:,0].flatten() 
+        plot_tmat(model, num_states, ax=tmat_ax)
+
     else:
         fig, ax = plt.subplots(nrows=num_states if multi_mice else 1,
-                               figsize=(7, 2.5*(multi_mice*2)), dpi=80)
+                               figsize=(7, 1.5*(multi_mice*1 + 1)), dpi=80)
 
     if multi_mice:
         models = []
         for _, m_ in model.items():
             model_idx = np.where(m_.num_states == num_states)[0][0]
             models.append(m_.model[model_idx])
+        # weight dims: (imouse, latent state, num_features)
         weights = get_multi_mice_metrics(models, 'weights')
         model = m_ # for convenience
-    else:
-        model_idx = np.where(model.num_states == num_states)[0][0]
-        weights = -model.model[model_idx].observations.params
 
-    c = {i: sns.color_palette()[i] for i in range(num_states)}
-    for k in range(num_states):
-        ax_ = ax[k] if multi_mice else ax
+    c = {i: sns.color_palette()[i] for i in state_iter}
+    for i, k in enumerate(state_iter):
+        ax_ = ax[i] if n_rows>1 else ax[0]
         for grp in np.arange(len(model.features), step=model.nlags):
             
             if multi_mice:
@@ -100,25 +102,30 @@ def plot_glm_weights(model, num_states,
                      np.mean(weights, axis=0)[k, grp:grp+model.nlags],
                      label=None, 
                      lw=2, marker='o', markersize=5, color='k')
-
             else: 
+                model_idx = np.where(model.num_states == k)[0][0]
+                 # weight dims: (latent state, always zero, num_features)
+                weights = -model.model[model_idx].observations.params
                 ax_.plot(range(grp, grp+model.nlags),
-                     weights[0, k, grp:grp+model.nlags],
-                     label=f'State {k + 1}' if grp==0 else None, 
+                     weights[i, 0, grp:grp+model.nlags],
+                     label=f'State {k}' if grp==0 else None, 
                      lw=2, marker='o', markersize=5, color=c.get(k))
 
         ax_.hlines(xmin=-1, xmax=len(model.features) + 1, y=0, color='k', lw=0.5)
-        ax_.set(xlabel='Features', xlim=(0, len(model.features)),
+        ax_.set(xlabel='', xlim=(0, len(model.features)),
                 ylabel='GLM weight', )
-        ax_.set_xticks(np.arange(len(model.features)), model.features,
-                    rotation=45, fontsize=10)
+        ax_.set_xticks([])
+    
+    ax_.set(xlabel='Features')
+    ax_.set_xticks(np.arange(len(model.features)), model.features,
+                rotation=45, fontsize=10)
 
     if not multi_mice:
-        ax_.legend(bbox_to_anchor=(1, 1), frameon=False)
+        ax_.legend(bbox_to_anchor=(1.05,1), frameon=False)
 
-    plt.tight_layout()
-    plt.subplots_adjust(wspace=0.01, hspace=0.01)
     sns.despine()
+    fig.get_layout_engine().set(w_pad=4 / 72, h_pad=4 / 72, hspace=0,
+                            wspace=0)
 
 
 def plot_tmat(model, num_states, ax=None):
@@ -142,10 +149,11 @@ def plot_tmat(model, num_states, ax=None):
                             ha="center", va="center", color="k", fontsize=10)
     ax.set(xlabel='state t+1', xlim=(-0.5, num_states - 0.5),
             ylabel='state t', ylim=(num_states - 0.5, -0.5),
-            title='Transition matrix')
+            # title='Transition matrix'
+            )
     ax.set_xticks(np.arange(num_states), range(1, num_states+1), fontsize=10)
     ax.set_yticks(np.arange(num_states), range(1, num_states+1), fontsize=10)
-    plt.tight_layout()
+    # plt.tight_layout()
 
 
 def compare_k_states(models, metric, datasets=['train', 'test'], **kwargs):
@@ -180,3 +188,25 @@ def compare_k_states_no_err(model, metric, datasets=['train', 'test'], **kwargs)
     plt.legend(bbox_to_anchor=(1, 1))
     ax.set(xlabel="Number of states", **kwargs)
     sns.despine()
+
+
+def add_sunburst_subplot(occ_counts, mouse, fig, j, ring_range=(0,4), **kwargs):
+
+    fig_tmp = px.sunburst(occ_counts,
+                          path=[f'model_state{i}' for i in range(*ring_range)],
+                          values='count',
+                          title=mouse
+                          )
+    fig_tmp.update(layout_coloraxis_showscale=False)
+
+    n_rows = fig._get_subplot_rows_columns()[0][-1]
+    fig.add_trace(go.Sunburst(
+                  labels=fig_tmp['data'][0]['labels'].tolist(),
+                  parents=fig_tmp['data'][0]['parents'].tolist(),
+                  values=fig_tmp['data'][0]['values'].tolist(),
+                  ids=fig_tmp['data'][0]['ids'].tolist(),
+                  **kwargs
+                            ),
+                 row=int(j//n_rows)+1, col=int(j%n_rows)+1
+                )
+    return fig

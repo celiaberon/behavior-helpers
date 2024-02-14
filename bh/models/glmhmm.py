@@ -59,7 +59,7 @@ class ModelData(ABC):
         self.X = self.X.drop(index=lag_nulls)
         self.y = self.y.drop(index=lag_nulls)
         self.X = self.X.drop(columns=list(feat_funcs.keys()))
-        self.features = self.X.columns.drop('Session').values
+        self.features = self.X.columns.drop(['Session', 'nTrial']).values
 
     def get_data_subset(self, dataset='X', col='Session', vals=None):
 
@@ -346,52 +346,4 @@ class GLMHMM(ModelData):
         ax.set(xlabel='trial', ylabel='prob')
         plt.legend(bbox_to_anchor=(1, 1), title='latent state')
         sns.despine()
-
-    def plot_glm_weights(self, model_idx, with_tmat=True):
-
-        weights = -self.model[model_idx].observations.params
-
-        c = {i: sns.color_palette()[i] for i in range(len(self.num_states))}
-        if with_tmat:
-            fig, axs = plt.subplots(ncols=2, figsize=(9, 3), dpi=80, width_ratios=(1, 1))
-            self.plot_tmat(model_idx, ax=axs[1])
-            ax = axs[0]
-        else:
-            fig, ax = plt.subplots(figsize=(7, 2.5), dpi=80)
-
-        for k in range(model_idx + 1):
-            for grp in np.arange(len(self.features), step=self.nlags):
-                ax.plot(range(grp, grp+self.nlags),
-                         weights[k, 0, grp:grp+self.nlags],
-                         label=f'State {k + 1}' if grp==0 else None, 
-                         lw=2, marker='o', markersize=5, color=c.get(k))
-
-        ax.hlines(xmin=-1, xmax=len(self.features) + 1, y=0, color='k', lw=1)
-        ax.legend(bbox_to_anchor=(1, 1), frameon=False)
-        ax.set(xlabel='Features', xlim=(0, len(self.features)),
-               ylabel='GLM weight', )
-        ax.set_xticks(np.arange(len(self.features)), self.features,
-                   rotation=45, fontsize=10)
-
-        plt.tight_layout()
-        sns.despine()
-
-    def plot_tmat(self, model_idx, ax=None):
-
-        tmat = np.exp(self.model[model_idx].transitions.params)[0]
-        plot_states = self.num_states[:model_idx+1]
-
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 3), dpi=80)
-        ax.imshow(tmat, vmin=-0.8, vmax=1, cmap='bone')
-        for i in range(tmat.shape[0]):
-            for j in range(tmat.shape[1]):
-                _ = plt.text(j, i, str(np.around(tmat[i, j], decimals=2)),
-                             ha="center", va="center", color="k", fontsize=10)
-        ax.set(xlabel='state t+1', xlim=(-0.5, len(plot_states) - 0.5),
-               ylabel='state t', ylim=(len(plot_states) - 0.5, -0.5),
-               title='Transition matrix')
-        plt.xticks(plot_states - 1, plot_states, fontsize=10)
-        plt.yticks(plot_states - 1, plot_states, fontsize=10)
-        plt.tight_layout()
 
