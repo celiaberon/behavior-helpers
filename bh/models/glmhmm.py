@@ -35,6 +35,7 @@ class ModelData(ABC):
                           'dir-rew': lambda r, c: r * pm1(c)
                           }
 
+        self.X_raw = trials.copy()
         initial_cols = [col for col in feat_funcs if col in trials.columns]
         trials_clean = trials.dropna(subset=['Reward', 'direction'])
 
@@ -73,15 +74,15 @@ class ModelData(ABC):
 
         session_starts = X.groupby('Session').nth(0).index.values
         session_starts = np.concatenate((session_starts, [len(X)]))
-        trial_ids = [X.loc[start:stop].nTrial.values
-                     for start, stop in zip(session_starts, session_starts[1:])]
+        trial_ids = [X.loc[start:stop-1].nTrial.values
+                     for start, stop in zip(session_starts[:-1], session_starts[1:])]
         X = X.drop(columns=['Session', 'nTrial'])
         y = y.drop(columns=['Session', 'nTrial'])
 
-        X_by_sess = [X.loc[start:stop].to_numpy()
-                     for start, stop in zip(session_starts, session_starts[1:])]
-        y_by_sess = [y.loc[start:stop].to_numpy().reshape(-1, 1).astype('int')
-                     for start, stop in zip(session_starts, session_starts[1:])]
+        X_by_sess = [X.loc[start:stop-1].to_numpy()
+                     for start, stop in zip(session_starts[:-1], session_starts[1:])]
+        y_by_sess = [y.loc[start:stop-1].to_numpy().reshape(-1, 1).astype('int')
+                     for start, stop in zip(session_starts[:-1], session_starts[1:])]
 
         return X_by_sess, y_by_sess, trial_ids
 
@@ -301,7 +302,7 @@ class GLMHMM(ModelData):
             self.test_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
             self.test_occupancy_rates.append(state_occupancies)
 
-    def predict_choice(self, accuracy=True, verbose=False):
+    def predict_choice(self, accuracy=True, verbose=False, policy='greedy'):
 
         self.pchoice = []
         acc = []
@@ -320,7 +321,10 @@ class GLMHMM(ModelData):
             pright = np.sum(np.multiply(posterior_probs, pright), axis=1)
 
             # Get the predicted label for each time step.
-            pred_choice = np.around(pright, decimals=0).astype('int')
+            if policy == 'greedy':
+                pred_choice = np.around(pright, decimals=0).astype('int')
+            elif policy == 'prob_match':
+                pred_choice = (np.random.random(size=len(pright)) < pright).astype('int')
             self.pchoice.append(pred_choice)
             if accuracy:
                 pred_accuracy = np.mean(np.concatenate(self.test_y, axis=0)[:, 0] == pred_choice)
