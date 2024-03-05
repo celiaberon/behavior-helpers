@@ -78,14 +78,27 @@ def calc_conditional_probs(trials: pd.DataFrame,
         cond_probs = cond_probs.sort_values(by='pevent')
     elif sortby == 'history':
         horder = kwargs.get('order', None)
-        cond_probs_all_histories = pd.DataFrame(data={'history': horder})
-        for col in cond_probs.columns:
-            if col == 'history': continue
-            cond_probs_all_histories[col] = cond_probs_all_histories['history'].map(cond_probs.set_index('history')[col])
-        cond_probs = cond_probs_all_histories.copy()
-        # cond_probs.history = cond_probs.history.astype('category')
-        # cond_probs['history'] = cond_probs['history'].cat.set_categories(horder)
-        # cond_probs = cond_probs.sort_values(by='history')
+        if add_grps:
+            other_cols = [col for col in cond_probs.columns
+                          if col not in ['history', add_grps]]
+            cp_all_histories = pd.DataFrame()
+            # Make sure each group has same histories, even if some types
+            # missing.
+            for g, cp_grp in cond_probs.groupby(add_grps):
+                if missing_h := set(horder) - set(cp_grp.history):
+                    print(missing_h)
+                    cp_grp = (pd.concat(
+                        (cp_grp, pd.DataFrame({'history': list(missing_h)},
+                         index=np.arange(len(missing_h)))))
+                        .reset_index(drop=True))
+                    cp_grp.loc[cp_grp.history.isin(list(missing_h)), other_cols] = 0
+                    cp_grp.loc[cp_grp.history.isin(list(missing_h)), add_grps] = g
+                cp_all_histories = (pd.concat((cp_all_histories, cp_grp))
+                                    .reset_index(drop=True))
+            cond_probs = cp_all_histories.copy()
+        cond_probs.history = cond_probs.history.astype('category')
+        cond_probs['history'] = cond_probs['history'].cat.set_categories(horder)
+        cond_probs = cond_probs.sort_values(by='history')
 
     return cond_probs
 
@@ -291,7 +304,7 @@ def calc_bpos_probs(trials: pd.DataFrame,
         if not isinstance(add_agg_cols, list):
             add_agg_cols = [add_agg_cols]
         agg_cols.extend(add_agg_cols)
-    agg_funcs = {agg_col: np.mean for agg_col in agg_cols}
+    agg_funcs = {agg_col: 'mean' for agg_col in agg_cols}
 
     # Add column tracking how far trial is from end of block.
     trials['rev_iInBlock'] = trials['iInBlock'] - trials['blockLength']
