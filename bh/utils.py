@@ -36,23 +36,26 @@ def get_dict_item_by_idx(d, idx):
     for i, (k, v) in enumerate(d.items()):
         if i == idx:
             return k, v
-        
+ 
 
 def encode_as_rl(choices, rewards):
-        
-    mapping = {(-1,0): 'r', (-1,1): 'R', (1,0): 'l', (1,1): 'L'} 
+ 
+    mapping = {(-1, 0): 'r', (-1, 1): 'R', (1, 0): 'l', (1, 1): 'L'} 
 
-    return ''.join([mapping[(c,r)] for c,r in zip(choices, rewards)])
+    return ''.join([mapping[(c, r)] for c, r in zip(choices, rewards)])
+
 
 def encode_sequences(rlseq, lag=3):
 
     mappings_ref_L = {'L': 'A', 'l': 'a', 'R': 'B', 'r': 'b'}
     mappings_ref_R = {'R': 'A', 'r': 'a', 'L': 'B', 'l': 'b'}
 
+    if isinstance(rlseq, str):
+        rlseq = list(rlseq)
     seqs = []
-    for first, second, third in zip(rlseq[2:], rlseq[1:-1], rlseq[:-2]):
-
-        ref = mappings_ref_L if first.upper()=='L' else mappings_ref_R
-        seqs.append(''.join([ref[first], ref[second], ref[third]]))
+    seqs.extend([np.nan] * (lag - 1))
+    for seq in np.array([rlseq[i:len(rlseq)-lag+i+1] for i in range(lag)]).T:
+        ref = mappings_ref_L if seq[0].upper() == 'L' else mappings_ref_R
+        seqs.append(''.join([ref[el] for el in seq]))
 
     return seqs
