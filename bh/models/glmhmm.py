@@ -35,7 +35,7 @@ class ModelData(ABC):
                           'dir-rew': lambda r, c: r * pm1(c)
                           }
 
-        self.X_raw = trials.copy()
+        self.data_raw = trials.copy()
         initial_cols = [col for col in feat_funcs if col in trials.columns]
         trials_clean = trials.dropna(subset=['Reward', 'direction'])
 
@@ -335,9 +335,9 @@ class GLMHMM(ModelData):
         if accuracy:
             return acc
 
-
     def plot_state_probs(self, model_idx, sess_idx: int = 0,
-                         as_occupancy: bool = False):
+                         as_occupancy: bool = False,
+                         fill_state: bool = True):
 
         if as_occupancy:
             samples = self.test_occupancy[model_idx][sess_idx]
@@ -347,7 +347,20 @@ class GLMHMM(ModelData):
         fig, ax = plt.subplots(figsize=(6, 3))
         for i in range(model_idx + 1):
             plt.plot(samples[:, i], label=i, alpha=0.8)
+
+        if fill_state:
+            state_preds = self.test_max_prob_state[model_idx][sess_idx]
+            transitions = np.diff(state_preds)
+            t_idx = np.insert(np.where(transitions != 0), 0, 0)
+            t_idx = np.append(t_idx, len(state_preds)-2)
+            state_ids = state_preds[t_idx+1]
+
+            for t_start, t_stop, state in zip(t_idx[:-1], t_idx[1:], state_ids):
+                ax.fill_betweenx(y=[0, 1], x1=t_start, x2=t_stop, alpha=0.3,
+                                 color=sns.color_palette()[state])
+
         ax.set(xlabel='trial', ylabel='prob')
         plt.legend(bbox_to_anchor=(1, 1), title='latent state')
         sns.despine()
 
+        return fig, ax
