@@ -36,10 +36,10 @@ def get_dict_item_by_idx(d, idx):
     for i, (k, v) in enumerate(d.items()):
         if i == idx:
             return k, v
- 
+
 
 def encode_as_rl(choices, rewards):
- 
+
     mapping = {(-1, 0): 'r', (-1, 1): 'R', (1, 0): 'l', (1, 1): 'L'} 
 
     return ''.join([mapping[(c, r)] for c, r in zip(choices, rewards)])
@@ -59,3 +59,15 @@ def encode_sequences(rlseq, lag=3):
         seqs.append(''.join([ref[el] for el in seq]))
 
     return seqs
+
+
+def reference_trials(ts_trials, trials, merge_var):
+
+    '''
+    Accurate referencing between separately loaded session-aggregated trials.
+    '''
+
+    ts_trials_ = ts_trials.copy()
+    ts_trials_ = ts_trials_.merge(trials[['Session', 'nTrial_orig', merge_var]],
+                                  how='left', on=['Session', 'nTrial_orig'])
+    return ts_trials_
