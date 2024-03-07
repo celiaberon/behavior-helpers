@@ -68,16 +68,18 @@ def plot_glm_weights(model, num_states,
         fig = plt.figure(layout='constrained', figsize=(7, (1.5 * n_rows)+0.5))
         gs = GridSpec(ncols=3, nrows=n_rows, figure=fig)
         weight_ax = [fig.add_subplot(gs[i, :2]) for i in range(n_rows)]
+        print(len(weight_ax))
+        [weight_ax[i].sharey(weight_ax[i+1]) for i in range(len(weight_ax)-1)] 
         if multi_mice:
             tmat_ax = fig.add_subplot(gs[:, -1])
         else:
             tmat_ax = fig.add_subplot(gs[0, -1])
-        ax = weight_ax#[:,0].flatten() 
+        ax = weight_ax
         plot_tmat(model, num_states, ax=tmat_ax)
 
     else:
         fig, ax = plt.subplots(nrows=num_states if multi_mice else 1,
-                               figsize=(7, 1.5*(multi_mice*1 + 1)), dpi=80)
+                               figsize=(7, 1.5*(multi_mice*1 + 1)), dpi=80, sharex=True, sharey=True)
 
     if multi_mice:
         models = []
