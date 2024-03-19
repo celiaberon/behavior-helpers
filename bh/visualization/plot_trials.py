@@ -1,7 +1,11 @@
+import itertools
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+
+from bh.utils import check_leg_duplicates
 
 sns.set(style='ticks', font_scale=1.0, rc={'axes.labelsize': 12,
         'axes.titlesize': 12, 'savefig.transparent': True})
@@ -98,7 +102,7 @@ def calc_conditional_probs(trials: pd.DataFrame,
             cond_probs = cp_all_histories.copy()
         cond_probs.history = cond_probs.history.astype('category')
         cond_probs['history'] = cond_probs['history'].cat.set_categories(horder)
-        cond_probs = cond_probs.sort_values(by='history')
+        cond_probs = cond_probs.sort_values(by=['history', add_grps])
 
     return cond_probs
 
@@ -125,11 +129,23 @@ def plot_sequences(cond_probs: pd.DataFrame,
 
     overlay_label = kwargs.get('overlay_label', '')
     yval = kwargs.get('yval', 'pevent')
+    hue = kwargs.get('hue')
 
     if cond_probs.history.nunique() < 10:
         fig, ax = plt.subplots(figsize=(4.2, 2.5))
     else:
         fig, ax = plt.subplots(figsize=(10, 2.5))
+
+    if hue is not None:
+        nbars = cond_probs['history'].nunique()
+        err_pos_low = np.arange(nbars) - 0.2
+        err_pos_high = np.arange(nbars) + 0.2
+        err_pos = list(itertools.chain(*[(low, high) for low, high in zip(err_pos_low, err_pos_high)]))
+        cond_probs['err_pos'] = err_pos
+        err_col = 'err_pos'
+    else:
+        err_col = 'history'
+
     if overlay is not None:
         sns.barplot(x='history', y=yval, data=overlay, ax=ax,
                     color=sns.color_palette()[0],
@@ -139,12 +155,14 @@ def plot_sequences(cond_probs: pd.DataFrame,
                     fmt=' ', label=None, color=sns.color_palette('dark')[0])
 
     sns.barplot(x='history', y=yval, data=cond_probs, ax=ax, color='k',
-                label=kwargs.get('main_label', ''),
+                label=kwargs.get('main_label', ''), legend=1-any(hue),
+                hue=hue,
+                palette=kwargs.get('palette', None),
                 alpha=kwargs.get('alpha', 0.4), edgecolor=None)
-    ax.errorbar(x='history', y=yval, data=cond_probs, yerr=f'{yval}_err',
+    ax.errorbar(x=err_col, y=yval, data=cond_probs, yerr=f'{yval}_err',
                 fmt=' ', label=None, color='k')
 
-    ax.set(xlim=(-1, len(cond_probs)), ylim=(0, 1),
+    ax.set(xlim=(-1, len(cond_probs) // (any(hue) + 1)), ylim=(0, 1),
            ylabel=kwargs.get('ylab', 'P(switch)'),
            title=kwargs.get('title', None))
     plt.tight_layout()
@@ -163,6 +181,7 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
                          yval: str = 'pevent',
                          fig=None,
                          ax=None,
+                         grp='history',
                          **kwargs):
 
     '''
@@ -187,11 +206,12 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
         else:
             fig, ax = plt.subplots(figsize=(10, 2.5))
 
-    hue_grp = kwargs.get('grp', 'history')
+    if 'size' not in kwargs:
+        # Point size as function of number of points.
+        kwargs['size'] = 20 / cond_probs[grp].nunique()
 
-    sns.swarmplot(data=cond_probs.sort_values(by=hue_grp), x='history', y=yval,
-                  ax=ax, size=3, hue=hue_grp,
-                  palette=kwargs.get('pal', 'Blues'))
+    sns.swarmplot(data=cond_probs.sort_values(by=grp), x='history', y=yval,
+                  ax=ax, hue=grp, **kwargs)
 
     ax.legend(bbox_to_anchor=(1, 1), loc='upper left', frameon=False)
     return fig, ax
@@ -381,12 +401,3 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
     plt.tight_layout()
 
     return fig, axs
-
-
-def check_leg_duplicates(ax):
-
-    h, l = ax.get_legend_handles_labels()
-    legend_reduced = dict(zip(l, h))
-    ax.legend(legend_reduced.values(), legend_reduced.keys(),
-              bbox_to_anchor=(0.8, 1), edgecolor='white')
-    plt.tight_layout()
