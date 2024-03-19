@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -54,7 +55,7 @@ def encode_sequences(rlseq, lag=3):
         rlseq = list(rlseq)
     seqs = []
     seqs.extend([np.nan] * (lag - 1))
-    for seq in np.array([rlseq[i:len(rlseq)-lag+i+1] for i in range(lag)]).T:
+    for seq in np.array([rlseq[i:len(rlseq) - lag+i+1] for i in range(lag)]).T:
         ref = mappings_ref_L if seq[0].upper() == 'L' else mappings_ref_R
         seqs.append(''.join([ref[el] for el in seq]))
 
@@ -71,3 +72,12 @@ def reference_trials(ts_trials, trials, merge_var):
     ts_trials_ = ts_trials_.merge(trials[['Session', 'nTrial_orig', merge_var]],
                                   how='left', on=['Session', 'nTrial_orig'])
     return ts_trials_
+
+
+def check_leg_duplicates(ax):
+
+    h, l = ax.get_legend_handles_labels()
+    legend_reduced = dict(zip(l, h))
+    ax.legend(legend_reduced.values(), legend_reduced.keys(),
+              bbox_to_anchor=(0.8, 1), edgecolor='white')
+    plt.tight_layout()
