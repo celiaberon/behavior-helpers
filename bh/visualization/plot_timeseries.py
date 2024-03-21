@@ -1,8 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import seaborn as sns
-from matplotlib.lines import Line2D
 
 
 def plot_lick_raster(df, fs, state='Cue', start_trial=0, n_trials=120):

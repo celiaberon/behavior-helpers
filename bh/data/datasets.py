@@ -105,7 +105,6 @@ class HFDataSet(DataSet):
 
             ts, trials = self.load_session_data()
             if ts is None: continue
-            print(trials.shape)
             trials, ts = self.update_columns(trials, ts)
 
             # Trial level quality control needs to come at the end.
@@ -125,8 +124,8 @@ class HFDataSet(DataSet):
 class HFTrials(HFDataSet):
 
     def __init__(self,
-                mice: str | list[str],
-                **kwargs):
+                 mice: str | list[str],
+                 **kwargs):
 
         super().__init__(mice, **kwargs)
 

@@ -76,8 +76,8 @@ def reference_trials(ts_trials, trials, merge_var):
 
 def check_leg_duplicates(ax):
 
-    h, l = ax.get_legend_handles_labels()
-    legend_reduced = dict(zip(l, h))
+    h, lab = ax.get_legend_handles_labels()
+    legend_reduced = dict(zip(lab, h))
     ax.legend(legend_reduced.values(), legend_reduced.keys(),
               bbox_to_anchor=(0.8, 1), edgecolor='white')
     plt.tight_layout()

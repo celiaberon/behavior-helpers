@@ -12,7 +12,7 @@ from ssm.model_selection import cross_val_scores
 sys.path.append(f'{os.path.expanduser("~")}/GitHub/neural-timeseries-analysis/')
 from nta.features import behavior_features as bf
 
-from bh.utils import calc_ci, calc_sem, make_onehot_array
+from bh.utils import calc_ci, make_onehot_array
 
 
 class ModelData(ABC):
@@ -74,14 +74,14 @@ class ModelData(ABC):
 
         session_starts = X.groupby('Session').nth(0).index.values
         session_starts = np.concatenate((session_starts, [len(X)]))
-        trial_ids = [X.loc[start:stop-1].nTrial.values
+        trial_ids = [X.loc[start:stop - 1].nTrial.values
                      for start, stop in zip(session_starts[:-1], session_starts[1:])]
         X = X.drop(columns=['Session', 'nTrial'])
         y = y.drop(columns=['Session', 'nTrial'])
 
-        X_by_sess = [X.loc[start:stop-1].to_numpy()
+        X_by_sess = [X.loc[start:stop - 1].to_numpy()
                      for start, stop in zip(session_starts[:-1], session_starts[1:])]
-        y_by_sess = [y.loc[start:stop-1].to_numpy().reshape(-1, 1).astype('int')
+        y_by_sess = [y.loc[start:stop - 1].to_numpy().reshape(-1, 1).astype('int')
                      for start, stop in zip(session_starts[:-1], session_starts[1:])]
 
         return X_by_sess, y_by_sess, trial_ids
@@ -131,11 +131,15 @@ class ModelData(ABC):
 
 class GLMHMM(ModelData):
 
+    '''
+    Fit and characterize GLM-HMM, using and guided by the ssm package from
+    the Linderman lab: https://github.com/lindermanlab/ssm/
+    '''
+
     def __init__(self,
                  num_states,
                  obs_dim: int = 1,
                  num_cat: int = 2,
-                #  C: int = 2,
                  obs_kwargs: dict = None,
                  observations: str = 'input_driven_obs',
                  transitions: str = 'standard',
@@ -144,7 +148,7 @@ class GLMHMM(ModelData):
         super().__init__()
 
         self.num_states = np.array(num_states)
-        self.obs_dim = obs_dim  # number of observed dimensions, (e.g. reward, reaction time)
+        self.obs_dim = obs_dim  # number of observed dims, (e.g. reward, RT)
 
         self.observation_kwargs = obs_kwargs
         self.observations = observations
@@ -153,9 +157,12 @@ class GLMHMM(ModelData):
 
     def init_model(self):
 
+        '''
+        Initialize N instances of the model, for each of k number of states
+        in self.num_states.
+        '''
         self.model = {}
         for i, k in enumerate(self.num_states):
-            # Initialize model
             self.model[i] = ssm.HMM(k,
                                     self.obs_dim,
                                     self.input_dim,
@@ -163,10 +170,11 @@ class GLMHMM(ModelData):
                                     observation_kwargs=self.observation_kwargs,
                                     transitions=self.transitions,
                                     transition_kwargs=self.transition_kwargs
-                                )
+                                    )
 
     def fit_cv(self, n_iters=200, pval=0.1, reps=3):
 
+        '''Fit models with CV with *pval* heldout and return LLs.'''
         lls = []
         scores = {'train': [], 'test': []}
         for i in self.model:
@@ -187,7 +195,10 @@ class GLMHMM(ModelData):
 
     def compare_k_states(self, scores, datasets=['train', 'test']):
 
-        # plot train and test scores for each model and display confidence intervals
+        '''
+        Plot train and test scores for each model and display confidence
+        intervals.
+        '''
         fig, ax = plt.subplots(figsize=(4, 3), dpi=80)
         for key in datasets:
             plt.scatter(self.num_states, [np.mean(s) for s in scores[key]],
@@ -262,9 +273,8 @@ class GLMHMM(ModelData):
 
         self.train_states = []
         self.test_states = []
-        # self.pchoice = []
 
-        for i, model in self.model.items():
+        for _, model in self.model.items():
             self.train_states.append([model.expected_states(y, X)[0]
                                      for y, X in zip(self.train_y, self.train_X)])
             self.test_states.append([model.expected_states(y, X)[0]
@@ -290,7 +300,7 @@ class GLMHMM(ModelData):
             self.train_max_prob_state.append(state_max_posterior)
             self.train_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
             self.train_occupancy_rates.append(state_occupancies)
-    
+
             state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.test_states[i]]
             state_occupancies = np.zeros((i+1, len(self.test_states[i])))
             for idx_sess, max_post in enumerate(state_max_posterior):
@@ -316,7 +326,7 @@ class GLMHMM(ModelData):
             pright = [np.exp(model.observations.calculate_logits(input=X))
                       for X in self.test_X]
 
-            # Now multiply posterior probs and prob_right and sum over latent axis.
+            # Multiply posterior_probs with pright and sum over latent axis.
             pright = np.concatenate(pright, axis=0)[:, :, 1]
             pright = np.sum(np.multiply(posterior_probs, pright), axis=1)
 
@@ -330,7 +340,8 @@ class GLMHMM(ModelData):
                 pred_accuracy = np.mean(np.concatenate(self.test_y, axis=0)[:, 0] == pred_choice)
 
                 if verbose:
-                    print(f'Model with {i} state(s) has a test predictive accuracy of {pred_accuracy}')
+                    print(f'Model with {i} state(s) has a test predictive'
+                          f'accuracy of {pred_accuracy}')
                 acc.append(pred_accuracy)
         if accuracy:
             return acc
@@ -352,8 +363,8 @@ class GLMHMM(ModelData):
             state_preds = self.test_max_prob_state[model_idx][sess_idx]
             transitions = np.diff(state_preds)
             t_idx = np.insert(np.where(transitions != 0), 0, 0)
-            t_idx = np.append(t_idx, len(state_preds)-2)
-            state_ids = state_preds[t_idx+1]
+            t_idx = np.append(t_idx, len(state_preds) - 2)
+            state_ids = state_preds[t_idx + 1]
 
             for t_start, t_stop, state in zip(t_idx[:-1], t_idx[1:], state_ids):
                 ax.fill_betweenx(y=[0, 1], x1=t_start, x2=t_stop, alpha=0.3,
