@@ -69,6 +69,9 @@ def reference_trials(ts_trials, trials, merge_var):
     '''
 
     ts_trials_ = ts_trials.copy()
+    if 'Session' not in ts_trials_:
+        ts_trials_ = ts_trials_.rename(columns={'session': 'Session'})
+
     ts_trials_ = ts_trials_.merge(trials[['Session', 'nTrial_orig', merge_var]],
                                   how='left', on=['Session', 'nTrial_orig'])
     return ts_trials_

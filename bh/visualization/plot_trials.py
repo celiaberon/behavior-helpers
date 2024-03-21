@@ -129,20 +129,21 @@ def plot_sequences(cond_probs: pd.DataFrame,
 
     overlay_label = kwargs.get('overlay_label', '')
     yval = kwargs.get('yval', 'pevent')
-    hue = kwargs.get('hue')
+    hue = kwargs.get('hue', [])
 
     if cond_probs.history.nunique() < 10:
         fig, ax = plt.subplots(figsize=(4.2, 2.5))
     else:
         fig, ax = plt.subplots(figsize=(10, 2.5))
 
-    if hue is not None:
+    if hue:
+        err_col = 'err_pos'  # column to contain x position values
         nbars = cond_probs['history'].nunique()
         err_pos_low = np.arange(nbars) - 0.2
         err_pos_high = np.arange(nbars) + 0.2
-        err_pos = list(itertools.chain(*[(low, high) for low, high in zip(err_pos_low, err_pos_high)]))
-        cond_probs['err_pos'] = err_pos
-        err_col = 'err_pos'
+        err_pos = list(itertools.chain(*[(low, high) for low, high
+                                         in zip(err_pos_low, err_pos_high)]))
+        cond_probs[err_col] = err_pos
     else:
         err_col = 'history'
 
@@ -155,8 +156,8 @@ def plot_sequences(cond_probs: pd.DataFrame,
                     fmt=' ', label=None, color=sns.color_palette('dark')[0])
 
     sns.barplot(x='history', y=yval, data=cond_probs, ax=ax, color='k',
-                label=kwargs.get('main_label', ''), legend=1-any(hue),
-                hue=hue,
+                label=kwargs.get('main_label', ''), legend=1 - any(hue),
+                hue=hue if hue else None,
                 palette=kwargs.get('palette', None),
                 alpha=kwargs.get('alpha', 0.4), edgecolor=None)
     ax.errorbar(x=err_col, y=yval, data=cond_probs, yerr=f'{yval}_err',
@@ -181,7 +182,7 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
                          yval: str = 'pevent',
                          fig=None,
                          ax=None,
-                         grp='history',
+                         grp: str = 'Mouse',
                          **kwargs):
 
     '''
@@ -214,6 +215,39 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
                   ax=ax, hue=grp, **kwargs)
 
     ax.legend(bbox_to_anchor=(1, 1), loc='upper left', frameon=False)
+    return fig, ax
+
+
+def plot_seq_bar_and_points(trials: pd.DataFrame,
+                            htrials: int = 1,
+                            pred_col: str = '+1switch',
+                            grp: str = 'Mouse',
+                            **kwargs):
+
+    '''
+    Handles pairing of common base conditional prob barplot with sub-group
+    pointplots.
+    '''
+
+    # Calculate aggregate policies and plot conditional probs as barplot.
+    pooled_policies = calc_conditional_probs(trials,
+                                             htrials,
+                                             pred_col=pred_col,
+                                             sortby='pevent')
+    x_histories = pooled_policies.history.values
+    fig, ax = plot_sequences(pooled_policies, alpha=0.5, title='')
+
+    # Calculate subgroup policies that will be plotted as points overlaying
+    # aggregate data bars.
+    grp_policies = calc_conditional_probs(trials,
+                                          htrials,
+                                          pred_col=pred_col,
+                                          add_grps=grp,
+                                          sortby='history',
+                                          order=x_histories)
+    fig, ax = plot_sequence_points(grp_policies, fig=fig, ax=ax, grp=grp,
+                                   **kwargs)
+
     return fig, ax
 
 
