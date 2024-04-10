@@ -1,9 +1,15 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 
 
-def plot_lick_raster(df, fs, state='Cue', start_trial=0, n_trials=120):
+def plot_lick_raster(df: pd.DataFrame,
+                     fs: int | float,
+                     state: str = 'Cue',
+                     session_id: str=None,
+                     start_trial: int = 0,
+                     n_trials: int = 120):
 
     pal = sns.color_palette('Greys')
     colors = {1: pal[3], 2: 'k', 3: 'g'}  # color codes for choice direction
@@ -12,18 +18,25 @@ def plot_lick_raster(df, fs, state='Cue', start_trial=0, n_trials=120):
     window = (-1, 2)
     fs = int(fs)
 
+    if not isinstance(session_id, str):
+        session_id = np.random.choice(df.Session.unique())
+        print(session_id)
+    df_sess = df.copy().query('Session == @session_id')
+
     # Align all trials to onset of state, and take only n_trials of interest.
-    aligned_idx = (df.query(f'{state} == 1')
+    aligned_idx = (df_sess.query(f'{state} == 1')
                    .groupby('nTrial', as_index=False)
                    .nth(0).index.astype('int'))
-    aligned_idx = aligned_idx[start_trial:start_trial + n_trials].copy()
+    end_trial = min((start_trial + n_trials, df_sess.nTrial.values[-1]))
+    n_trials = end_trial - start_trial
+    aligned_idx = aligned_idx[start_trial:end_trial].copy()
 
     fig, ax = plt.subplots(figsize=(4, len(aligned_idx) / 45),
                            layout='constrained')
 
     n = 0  # trial counter
     for idx in aligned_idx[1:-1]:
-        licks = df.loc[idx + (window[0] * fs): idx + (window[1] * fs) - 1].copy()
+        licks = df_sess.loc[idx + (window[0] * fs): idx + (window[1] * fs) - 1].copy()
         licks['aligned_ms'] = np.arange(*window, step=1 / fs)
         licks = licks.loc[licks.iSpout != 0].copy()
 
