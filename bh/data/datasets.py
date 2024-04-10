@@ -26,6 +26,7 @@ class HFDataSet(DataSet):
         self.channels = None  # behavior only
         self.sig_channels = None  # behavior only
         self.cohort = None # self.load_cohort_dict()
+        self.palettes = self.load_color_palettes()
 
     def set_root(self):
         '''Sets the root path for the dataset'''
@@ -52,6 +53,12 @@ class HFDataSet(DataSet):
 
     def load_cohort_dict(self):
         pass
+
+    def load_color_palettes(self):
+
+        '''Load standard color palettes for plotting'''
+        palettes = load_config_variables(self.root)
+        return palettes
 
     def update_columns(self, trials, ts):
 
