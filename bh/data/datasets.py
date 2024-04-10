@@ -1,9 +1,7 @@
 import os
 import sys
-from abc import ABC, abstractmethod
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -25,7 +23,7 @@ class HFDataSet(DataSet):
         self.qc_photo = None  # behavior only
         self.channels = None  # behavior only
         self.sig_channels = None  # behavior only
-        self.cohort = None # self.load_cohort_dict()
+        self.cohort = None
         self.palettes = self.load_color_palettes()
 
     def set_root(self):
@@ -89,7 +87,8 @@ class HFDataSet(DataSet):
         ts_path = self.set_timeseries_path()
 
         if not (ts_path.exists() & trials_path.exists()):
-            if self.verbose: print(f'skipped {self.mouse_} {self.session_}')
+            if self.verbose:
+                print(f'skipped {self.mouse_} {self.session_}')
             return None, None
 
         ts = pd.read_csv(ts_path, index_col=0)
@@ -166,8 +165,8 @@ class HFTrials(HFDataSet):
     def get_max_trial(self, full_sessions: dict) -> int:
 
         '''
-        Get maximum trial ID to use for unique trial ID assignment. Importantly,
-        also confirm that max trial matches between dataframes.
+        Get maximum trial ID to use for unique trial ID assignment.
+        Importantly, also confirm that max trial matches between dataframes.
 
         Args:
             full_sessions:
@@ -191,8 +190,8 @@ class HFTrials(HFDataSet):
                         **kwargs):
 
         '''
-        Load in sessions by mouse and concatenate into one large dataframe keeping
-        every trial id unique.
+        Load in sessions by mouse and concatenate into one large dataframe
+        keeping every trial id unique.
 
         Args:
             mice:

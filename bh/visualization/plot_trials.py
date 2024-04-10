@@ -254,7 +254,7 @@ def plot_block_seq_overview(trials, sortby='seq2', block_length=None, **kwargs):
 
     # Use max block length found in data if no cutoff provided
     if block_length is None:
-        # Min number of trials per block position, evaluated only to set upper limit.
+        # Min num trials per block pos, evaluated only to set upper limit.
         min_trials = kwargs.pop('min_trials', 1)
         block_length = (trials.groupby('iInBlock')
                               .filter(lambda x: len(x) > min_trials)['iInBlock'].max())

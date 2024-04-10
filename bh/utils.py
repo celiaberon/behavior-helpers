@@ -41,7 +41,7 @@ def get_dict_item_by_idx(d, idx):
 
 def encode_as_rl(choices, rewards):
 
-    mapping = {(-1, 0): 'r', (-1, 1): 'R', (1, 0): 'l', (1, 1): 'L'} 
+    mapping = {(-1, 0): 'r', (-1, 1): 'R', (1, 0): 'l', (1, 1): 'L'}
 
     return ''.join([mapping[(c, r)] for c, r in zip(choices, rewards)])
 
