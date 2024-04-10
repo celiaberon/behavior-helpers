@@ -12,7 +12,6 @@ sns.set(style='ticks', font_scale=1.0, rc={'axes.labelsize': 12,
 
 
 def binomial_err(p, n):
-
     return np.sqrt(p * (1 - p)) / n
 
 
@@ -247,6 +246,28 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
                                           order=x_histories)
     fig, ax = plot_sequence_points(grp_policies, fig=fig, ax=ax, grp=grp,
                                    **kwargs)
+
+    return fig, ax
+
+
+def plot_block_seq_overview(trials, sortby='seq2', block_length=None, **kwargs):
+
+    # Use max block length found in data if no cutoff provided
+    if block_length is None:
+        # Min number of trials per block position, evaluated only to set upper limit.
+        min_trials = kwargs.pop('min_trials', 1)
+        block_length = (trials.groupby('iInBlock')
+                              .filter(lambda x: len(x) > min_trials)['iInBlock'].max())
+    trials_ = trials.query('iInBlock.between(0, @block_length)').sort_values(by=sortby)
+
+    fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
+    sns.histplot(data=trials_, x='iInBlock', hue='seq2', ax=ax, stat='count',
+                 bins=range(block_length + 2), multiple='stack', linewidth=0,
+                 **kwargs
+    )
+    ax.set(xticks=np.arange(block_length + 1, step=5), xlabel='Block position')
+    ax.get_legend().set(bbox_to_anchor=(1.2, 1))
+    sns.despine()
 
     return fig, ax
 
