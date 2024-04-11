@@ -35,7 +35,7 @@ def calc_conditional_probs(trials: pd.DataFrame,
             Trial-based dataframe.
         htrials:
             Number of trials in history to condition on. Defaults to 1, for
-            most recent trial only.
+            most recent trial only. Alternatively, column name directly.
         err_func:
             Error function to use on conditional prob. Supports binom for
             binomial error of conditional prob, or sem for standard error of
@@ -53,7 +53,10 @@ def calc_conditional_probs(trials: pd.DataFrame,
             Table of conditional probabilities and their conditioned group.
     '''
 
-    grp_cols = [f'seq{htrials}']
+    if isinstance(htrials, int):
+        grp_cols = [f'seq{htrials}']
+    else:
+        grp_cols = [htrials]
     if add_grps:
         grp_cols.append(add_grps)
 
@@ -62,7 +65,7 @@ def calc_conditional_probs(trials: pd.DataFrame,
     cond_probs = (trials.groupby(grp_cols)[pred_col]
                   .agg(['mean', 'std', 'count'], )
                   .reset_index()
-                  .rename(columns={f'seq{htrials}': 'history',
+                  .rename(columns={grp_cols[0]: 'history',
                                    'mean': 'pevent',
                                    'count': 'n'})
                   )
@@ -89,7 +92,6 @@ def calc_conditional_probs(trials: pd.DataFrame,
             # missing.
             for g, cp_grp in cond_probs.groupby(add_grps):
                 if missing_h := set(horder) - set(cp_grp.history):
-                    print(missing_h)
                     cp_grp = (pd.concat(
                         (cp_grp, pd.DataFrame({'history': list(missing_h)},
                          index=np.arange(len(missing_h)))))
@@ -99,9 +101,12 @@ def calc_conditional_probs(trials: pd.DataFrame,
                 cp_all_histories = (pd.concat((cp_all_histories, cp_grp))
                                     .reset_index(drop=True))
             cond_probs = cp_all_histories.copy()
+            grpby = ['history', add_grps]
+        else:
+            grpby = 'history'
         cond_probs.history = cond_probs.history.astype('category')
         cond_probs['history'] = cond_probs['history'].cat.set_categories(horder)
-        cond_probs = cond_probs.sort_values(by=['history', add_grps])
+        cond_probs = cond_probs.sort_values(by=grpby)
 
     return cond_probs
 
@@ -250,18 +255,18 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
     return fig, ax
 
 
-def plot_block_seq_overview(trials, sortby='seq2', block_length=None, **kwargs):
+def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock', block_length=None, **kwargs):
 
     # Use max block length found in data if no cutoff provided
     if block_length is None:
         # Min num trials per block pos, evaluated only to set upper limit.
         min_trials = kwargs.pop('min_trials', 1)
-        block_length = (trials.groupby('iInBlock')
-                              .filter(lambda x: len(x) > min_trials)['iInBlock'].max())
-    trials_ = trials.query('iInBlock.between(0, @block_length)').sort_values(by=sortby)
+        block_length = (trials.groupby(x)
+                              .filter(lambda x: len(x) > min_trials)[x].max())
+    trials_ = trials.query(f'{x}.between(0, @block_length)').sort_values(by=sortby)
 
     fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
-    sns.histplot(data=trials_, x='iInBlock', hue='seq2', ax=ax, stat='count',
+    sns.histplot(data=trials_, x=x, hue='seq2', ax=ax, stat='proportion',
                  bins=range(block_length + 2), multiple='stack', linewidth=0,
                  **kwargs
     )
@@ -410,7 +415,8 @@ def calc_bpos_probs(trials: pd.DataFrame,
 
 def plot_bpos_behavior(bpos_probs: pd.DataFrame,
                        include_units: str = '',
-                       plot_features: dict = None):
+                       plot_features: dict = None,
+                       **kwargs):
 
     '''
     Plot mean probabilities relative to block transitions.
@@ -434,13 +440,24 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
                          'Switch': ('P(switch)', (0, 0.4))}
 
     n_plots = len(plot_features.keys())
-    fig, axs = plt.subplots(ncols=n_plots, figsize=(3.6 * n_plots, 2.4))
+    fig, axs = plt.subplots(ncols=n_plots, figsize=(3.6 * n_plots, 2.4),
+                            layout='constrained')
 
+    if isinstance(axs, plt.Axes):
+        axs = [axs]
     for i, (metric, ax_vars) in enumerate(plot_features.items()):
         if include_units:
+            if kwargs.get('cmap', False):
+                plot_args = {'palette': kwargs.get('cmap'),
+                             'hue': include_units,
+                             'legend': False
+                             }
+            else:
+                plot_args = {'color': 'k',
+                             'label': include_units}
             sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i],
-                         color='k', units=include_units, estimator=None,
-                         lw=0.6, label=include_units)
+                         units=include_units, estimator=None, lw=kwargs.get('lw', 0.6),
+                         **plot_args)
         sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i], color='k',
                      lw=2, label='pooled')
 
@@ -453,6 +470,5 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
     axs[0].legend().remove()
     axs[-1].legend(bbox_to_anchor=(1, 1), edgecolor='white')
     check_leg_duplicates(axs[-1])
-    plt.tight_layout()
 
     return fig, axs
