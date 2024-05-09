@@ -244,3 +244,8 @@ class HFTrials(HFDataSet):
         # TODO: QC all mice sessions by ENL penalty rate set per mouse
 
         return multi_sessions
+
+    def get_sampling_freq(self):
+
+        '''Lazy workaround for inheriting from timeseries dataset'''
+        pass

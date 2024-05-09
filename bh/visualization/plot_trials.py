@@ -62,7 +62,7 @@ def calc_conditional_probs(trials: pd.DataFrame,
 
     # Calculate average probability of action (or predicted event) conditioned
     # on group.
-    cond_probs = (trials.groupby(grp_cols)[pred_col]
+    cond_probs = (trials.groupby(grp_cols, observed=True)[pred_col]
                   .agg(['mean', 'std', 'count'], )
                   .reset_index()
                   .rename(columns={grp_cols[0]: 'history',
@@ -78,7 +78,9 @@ def calc_conditional_probs(trials: pd.DataFrame,
     else:
         raise NotImplementedError
 
-    cond_probs = cond_probs.fillna(0)
+    cond_probs['history'] = cond_probs['history'].astype('str')  # for sorting
+    cols = [col for col in cond_probs.columns if cond_probs[col].dtype != 'category']
+    cond_probs[cols] = cond_probs[cols].fillna(0)
 
     if sortby == 'pevent':
         cond_probs = cond_probs.sort_values(by='pevent')
@@ -90,7 +92,7 @@ def calc_conditional_probs(trials: pd.DataFrame,
             cp_all_histories = pd.DataFrame()
             # Make sure each group has same histories, even if some types
             # missing.
-            for g, cp_grp in cond_probs.groupby(add_grps):
+            for g, cp_grp in cond_probs.groupby(add_grps, observed=True):
                 if missing_h := set(horder) - set(cp_grp.history):
                     cp_grp = (pd.concat(
                         (cp_grp, pd.DataFrame({'history': list(missing_h)},
@@ -261,7 +263,7 @@ def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock', block_length=No
     if block_length is None:
         # Min num trials per block pos, evaluated only to set upper limit.
         min_trials = kwargs.pop('min_trials', 1)
-        block_length = (trials.groupby(x)
+        block_length = (trials.groupby(x, observed=True)
                               .filter(lambda x: len(x) > min_trials)[x].max())
     trials_ = trials.query(f'{x}.between(0, @block_length)').sort_values(by=sortby)
 
@@ -398,10 +400,10 @@ def calc_bpos_probs(trials: pd.DataFrame,
         grp_rev.extend(add_cond_cols)
 
     bpos_probs = (trials
-                  .groupby(grp_forward, as_index=False)
+                  .groupby(grp_forward, as_index=False, observed=True)
                   .agg(agg_funcs))
     bpos_probs_rev = (trials
-                      .groupby(grp_rev, as_index=False)
+                      .groupby(grp_rev, as_index=False, observed=True)
                       .agg(agg_funcs))
 
     # Combine negative block positions with forward-counting positions.
@@ -448,7 +450,7 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
     for i, (metric, ax_vars) in enumerate(plot_features.items()):
         if include_units:
             if kwargs.get('cmap', False):
-                plot_args = {'palette': kwargs.get('cmap'),
+                plot_args = {'palette': kwargs.pop('cmap'),
                              'hue': include_units,
                              'legend': False
                              }
@@ -458,8 +460,14 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
             sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i],
                          units=include_units, estimator=None, lw=kwargs.get('lw', 0.6),
                          **plot_args)
-        sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i], color='k',
-                     lw=2, label='pooled')
+
+        # When just plotting grand mean.
+        if not kwargs.get('hue', False):
+            sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i],
+                         color='k', lw=2, label='pooled', **kwargs)
+        else:
+            sns.lineplot(bpos_probs, x='iInBlock', y=metric, ax=axs[i],
+                         lw=2, **kwargs)
 
         label, ylim = ax_vars
         axs[i].vlines(x=0, ymin=-1, ymax=1.5, ls='--', color='k', zorder=0)

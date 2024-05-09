@@ -25,7 +25,7 @@ def plot_lick_raster(df: pd.DataFrame,
 
     # Align all trials to onset of state, and take only n_trials of interest.
     aligned_idx = (df_sess.query(f'{state} == 1')
-                   .groupby('nTrial', as_index=False)
+                   .groupby('nTrial', as_index=False, observed=True)
                    .nth(0).index.astype('int'))
     end_trial = min((start_trial + n_trials, df_sess.nTrial.values[-1]))
     n_trials = end_trial - start_trial
