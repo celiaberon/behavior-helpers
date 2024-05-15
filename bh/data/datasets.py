@@ -1,7 +1,9 @@
+import gc
 import os
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -91,8 +93,54 @@ class HFDataSet(DataSet):
                 print(f'skipped {self.mouse_} {self.session_}')
             return None, None
 
-        ts = pd.read_csv(ts_path, index_col=0)
-        trials = pd.read_csv(trials_path, index_col=0)
+        trial_dtypes = {
+            'nTrial': np.int32,
+            'Mouse': 'object',
+            'Date': 'object',
+            'Session': 'object',
+            'Condition': np.int16,
+            'tSelection': np.int16,
+            'direction': np.float32,
+            'Reward': np.float32,
+            'T_ENL': np.int16,
+            'n_ENL': np.int8,
+            'n_Cue': np.int8,
+            'State': np.float32,
+            'selHigh': np.float32,
+            'iBlock': np.int8,
+            'blockLength': np.int8,
+            'iInBlock': np.int8,
+            'flag_block': 'bool',
+            'timeout': 'bool',
+            'Switch': np.float32
+        }
+
+        usecols = list(trial_dtypes.keys())
+        trials = pd.read_csv(trials_path, index_col=None, dtype=trial_dtypes,
+                             usecols=usecols)
+
+        ts_dtypes = {
+            'nTrial': np.float32,
+            'iBlock': np.float32,
+            'session': 'object',
+            'session_clock': 'float',
+            'iSpout': np.int8,
+            'ENLP': np.int8,
+            'CueP': np.int8,
+            'ENL': np.int8,
+            'Cue': np.int8,
+            'Select': np.int8,
+            'stateConsumption': np.int8,
+            'TO': np.int8,
+            'system_nTrial': np.float32,
+            'outcome_licks': np.int8,
+            'Consumption': np.int8,
+            'state_ENLP': np.int8,
+            'trial_clock': 'float'
+        }
+
+        usecols = list(ts_dtypes.keys())
+        ts = pd.read_csv(ts_path, index_col=None, usecols=usecols, dtype=ts_dtypes)
 
         return ts, trials
 
@@ -122,7 +170,14 @@ class HFDataSet(DataSet):
             multi_sessions = self.concat_sessions(sub_sessions=trials_matched,
                                                   full_sessions=multi_sessions)
 
+            n_sessions_mouse = (multi_sessions['trials']
+                                .query(f'Mouse == {self.mouse_} & nTrial > 1')['Session']
+                                .nunique())
+            if (self.session_cap is not None) and (n_sessions_mouse >= self.session_cap):
+                break
         # TODO: QC all mice sessions by ENL penalty rate set per mouse
+
+        gc.collect()
 
         return multi_sessions
 
