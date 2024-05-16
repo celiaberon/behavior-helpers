@@ -1,4 +1,5 @@
 import gc
+import getpass
 import os
 import sys
 from pathlib import Path
@@ -21,7 +22,10 @@ class HFDataSet(DataSet):
                  mice: str | list[str],
                  **kwargs):
 
+        assert 'celia' in getpass.getuser().lower(), (
+            'Please write your own DataSet class')
         super().__init__(mice, **kwargs)
+
         self.qc_photo = None  # behavior only
         self.channels = None  # behavior only
         self.sig_channels = None  # behavior only
@@ -30,7 +34,11 @@ class HFDataSet(DataSet):
 
     def set_root(self):
         '''Sets the root path for the dataset'''
-        return Path('/Volumes/Neurobio/MICROSCOPE/Celia/data/lickTask/')
+        if 'celia' in getpass.getuser().lower():
+            root = Path('/Volumes/Neurobio/MICROSCOPE/Celia/data/lickTask/')
+        else:
+            raise NotImplementedError('Need path for user with HFDataSet')
+        return root
 
     def set_data_path(self):
         '''Sets the path to the session data'''
