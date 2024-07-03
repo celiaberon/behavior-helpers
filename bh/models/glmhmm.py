@@ -188,7 +188,6 @@ class GLMHMM(ModelData):
     def __init__(self,
                  num_states,
                  obs_dim: int = 1,
-                 num_cat: int = 2,
                  obs_kwargs: dict = None,
                  observations: str = 'input_driven_obs',
                  transitions: str = 'standard',
@@ -199,15 +198,16 @@ class GLMHMM(ModelData):
         self.num_states = np.array(num_states)
         self.obs_dim = obs_dim  # number of observed dims, (e.g. reward, RT)
 
+        # Keyword arguments passed to ssm.HMM()
         self.observation_kwargs = obs_kwargs
         self.observations = observations
-        self.transitions = transitions
+        self.transitions = transitions  # 'standard' or 'sticky'
         self.transition_kwargs = trans_kwargs
 
     def init_model(self):
 
         '''
-        Initialize N instances of the model, for each of k number of states
+        Initialize an instance of the model for each of k number of states
         in self.num_states.
         '''
         self.model = {}
@@ -242,64 +242,97 @@ class GLMHMM(ModelData):
 
         return lls, scores
 
-    def compare_k_states(self, scores, datasets=['train', 'test']):
+    def compare_k_states(self,
+                         scores,
+                         datasets: list[str] = ['train', 'test']):
 
         '''
         Plot train and test scores for each model and display confidence
         intervals.
         '''
-        fig, ax = plt.subplots(figsize=(4, 3), dpi=80)
+        fig, ax = plt.subplots(figsize=(4, 3), dpi=80, layout='constrained')
         for key in datasets:
             plt.scatter(self.num_states, [np.mean(s) for s in scores[key]],
                         label=key)
             plt.errorbar(self.num_states, [np.mean(s) for s in scores[key]],
                          [calc_ci(s)[2] for s in scores[key]], alpha=0.3)
-
         plt.legend(bbox_to_anchor=(1, 1))
-        ax.set(xlabel="Number of states", ylabel="Log Probability",
-               title="Cross Validation Scores with 95% CIs")
+        ax.set(xlabel='Number of states', ylabel='Log Probability',
+               title='CV Scores with 95% CIs')
+        sns.despine()
 
-    def compare_k_states_no_err(self, scores, ylab='', datasets=['train', 'test'], **kwargs):
-
-        fig, ax = plt.subplots(figsize=(4, 3), dpi=80)
+    def compare_k_states_no_err(self,
+                                scores,
+                                ylab: str = '',
+                                datasets: list[str] = ['train', 'test'],
+                                **kwargs):
+        '''Plot train and test scores for each model without error bars.'''
+        fig, ax = plt.subplots(figsize=(4, 3), dpi=80, layout='constrained')
 
         for key in datasets:
             plt.scatter(self.num_states, scores[key], label=key)
-
         plt.legend(bbox_to_anchor=(1, 1))
-        ax.set(xlabel="Number of states", ylabel=ylab)
+        ax.set(xlabel='Number of states', ylabel=ylab)
         if ylim := kwargs.get('ylim', False):
             plt.ylim(ylim)
         sns.despine()
 
-    def calc_log_likelihood(self, verbose=False, normalize=False,
-                            as_bits=False):
+    def calc_log_likelihood(self,
+                            verbose: bool = False,
+                            normalize: bool = False,
+                            as_bits: bool = False) -> dict[str, np.array]:
 
-        assert sum((normalize, as_bits)) < 2, 'cannot normalize and compute bits together'
+        '''
+        Calclulate log likelihoood for train and test sets.
+        Args:
+            verbose:
+                If True, print LL scores.
+            normalize:
+                If True, normalize LL by number of trials in each dataset as
+                (LL / num_trials).
+            as_bits:
+                If True, compute LL in units of bits as
+                (LL - LL0) / (np.log(2) * num_trials)
+                where LL0 is the LL for a standard GLM (1 state model).
+                Note: mutually exclusive with normalize.
+        '''
+        assert sum((normalize, as_bits)) < 2, (
+            'Cannot normalize and compute bits together')
+
+        if as_bits:
+            assert self.num_states[0] == 1, (
+                'Bitwise LL needs 1 state model to reference for LL0.'
+            )
+
+        # Divide by number of trials if normalizing likelihood.
         denom_train = self.train_num_trials if normalize else 1
         denom_test = self.test_num_trials if normalize else 1
-        # print(f'{denom_train =} \n{denom_test=}')
+
         LL = {'train': np.zeros(len(self.num_states)),
               'test': np.zeros(len(self.num_states))}
         for i, model in self.model.items():
+
+            # Train LL.
             ll_train = (model.log_likelihood(self.train_y, inputs=self.train_X)
                         / denom_train)
             if as_bits:
                 ll0 = (self.model[0].log_likelihood(self.train_y, inputs=self.train_X)
-                        / denom_train)
+                       / denom_train)
                 denom = np.log(2) * self.train_num_trials
                 ll_train = (ll_train - ll0) / denom
             LL['train'][i] = ll_train
 
+            # Test LL.
             ll_test = (model.log_likelihood(self.test_y, inputs=self.test_X)
                        / denom_test)
 
             if as_bits:
                 ll0 = (self.model[0].log_likelihood(self.test_y, inputs=self.test_X)
-                        / denom_test)
+                       / denom_test)
                 denom = np.log(2) * self.test_num_trials
                 ll_test = (ll_test - ll0) / denom
             LL['test'][i] = ll_test
+
             if verbose:
                 print((f'Model with {i} states:'
                        f'\n{"":>5}{"train LL":<8} = {LL["train"][i]:.2f}'
