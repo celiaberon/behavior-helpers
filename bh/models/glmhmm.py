@@ -1,6 +1,6 @@
 import os
 import sys
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,30 +25,46 @@ class ModelData(ABC):
 
     def prepare_features(self, trials, yvar, feat_funcs=None, nlags=3):
 
-        self.nlags = nlags
+        '''
+        Create design matrix containing features (transformed) and history
+        features up to nlags.
+        '''
+        self.nlags = nlags  # history length per feature
 
         def pm1(x):
             return 2 * x - 1
+
         if feat_funcs is None:
             feat_funcs = {'Reward': lambda r, c: r,
                           'direction': lambda r, c: pm1(c),
                           'dir-rew': lambda r, c: r * pm1(c)
                           }
+        else:
+            assert all([col in ['Reward', 'direction', 'dir-rew']
+                        for col in feat_funcs]), (
+                'Transformations only work for Reward- and Direction-based inputs.'
+            )
 
         self.data_raw = trials.copy()
         initial_cols = [col for col in feat_funcs if col in trials.columns]
+
+        # Just drop NaNs (timeouts) for now.
         trials_clean = trials.dropna(subset=['Reward', 'direction'])
 
+        # Keep session and trial ID for now to register train/test splits.
         self.y = trials_clean[[yvar, 'Session', 'nTrial']].copy()
         self.X = trials_clean[initial_cols + ['Session', 'nTrial']].copy()
 
-        # Forward and backward shifts that can be useful (need to shift up front).
+        # Forward and backward shifts (need to shift before any splitting).
         for feature, func in feat_funcs.items():
 
-            self.X[feature] = func(trials_clean['Reward'].values, trials_clean['direction'].values)
-            print(self.X[feature].unique())
+            # Apply transformation to the feature.
+            self.X[feature] = func(trials_clean['Reward'].values,
+                                   trials_clean['direction'].values)
+            print(feature, self.X[feature].unique())
             for lag in range(1, nlags + 1):
-                self.X = bf.shift_trial_feature(self.X, col=feature,
+                self.X = bf.shift_trial_feature(self.X,
+                                                col=feature,
                                                 n_shift=lag,
                                                 shift_forward=True)
 
@@ -56,29 +72,52 @@ class ModelData(ABC):
 
         self.X = self.X.reset_index(drop=True)
         self.y = self.y.reset_index(drop=True)
+
+        # Get indices for rows containing NaNs in any features (including
+        # lagged histories) and drop from feature matrix.
         lag_nulls = np.unique(np.where(np.isnan(self.X.drop(columns=['Session'])))[0])
         self.X = self.X.drop(index=lag_nulls)
         self.y = self.y.drop(index=lag_nulls)
+
+        # Drop original feature columns and keep only transformed ones.
         self.X = self.X.drop(columns=list(feat_funcs.keys()))
+
+        # Store list of feature columns names.
         self.features = self.X.columns.drop(['Session', 'nTrial']).values
 
     def get_data_subset(self, dataset='X', col='Session', vals=None):
 
+        '''Query dataset for matching values in a particular column.'''
         if dataset == 'X':
-            return self.X.copy().query(f'{col}.isin(@vals)').reset_index(drop=True)
+            return (self.X.copy()
+                    .query(f'{col}.isin(@vals)')
+                    .reset_index(drop=True))
 
         else:
-            return self.y.copy().query(f'{col}.isin(@vals)').reset_index(drop=True)
+            return (self.y.copy()
+                    .query(f'{col}.isin(@vals)')
+                    .reset_index(drop=True))
 
     def iter_by_session(self, X, y):
 
-        session_starts = X.groupby('Session').nth(0).index.values
+        '''
+        Create nested lists of len()=number of sessions, so that session
+        becomes and iterable.
+        '''
+        # Index of first trial (of dataset) in each session.
+        session_starts = (X
+                          .groupby('Session', observed=True)
+                          .nth(0)
+                          .index.values)
         session_starts = np.concatenate((session_starts, [len(X)]))
+
+        # All trial ids, by session in a nested list.
         trial_ids = [X.loc[start:stop - 1].nTrial.values
                      for start, stop in zip(session_starts[:-1], session_starts[1:])]
         X = X.drop(columns=['Session', 'nTrial'])
         y = y.drop(columns=['Session', 'nTrial'])
 
+        # Convert datasets to nested lists over sessions.
         X_by_sess = [X.loc[start:stop - 1].to_numpy()
                      for start, stop in zip(session_starts[:-1], session_starts[1:])]
         y_by_sess = [y.loc[start:stop - 1].to_numpy().reshape(-1, 1).astype('int')
@@ -88,37 +127,47 @@ class ModelData(ABC):
 
     def split_data(self, ptrain=0.8, seed=0, verbose=False):
 
-        # Assign session ids to train and test splits
+        '''
+        Split data into train and tests sets by session ID. Note, this severely
+        limits the possible combinations of train/val/test datasets.
+        '''
+        # Assign session ids to train and test splits.
         train_ids, test_ids = train_test_split(self.X['Session'].unique(),
                                                train_size=ptrain,
                                                random_state=seed)
 
         if verbose:
-            print(f'{len(train_ids)} training sessions and {len(test_ids)} test sessions')
+            print(f'{len(train_ids)} training sessions and',
+                  f'{len(test_ids)} test sessions')
 
+        # Make sure id lists are complete and contain unique values only.
         assert len(train_ids) == len(set(train_ids))
         assert len(test_ids) == len(set(test_ids))
 
         self.train_num_sess = len(train_ids)
         self.test_num_sess = len(test_ids)
 
-        # Split data into train and test sets
+        # Split data into train and test sets.
         train_X = self.get_data_subset(dataset='X', col='Session',
                                        vals=train_ids)
         train_y = self.get_data_subset(dataset='y', col='Session',
                                        vals=train_ids)
+
         self.train_num_trials = len(train_X)
         assert len(train_y) == self.train_num_trials, (
             'Different number of trials in train X and y')
 
+        # Store datasets with session as iterable first level.
         self.train_X, self.train_y, self.train_trials = self.iter_by_session(train_X, train_y)
         assert len(self.train_y) == len(self.train_X), (
             'Different number of sessions in train X and y')
 
+        # Test set.
         test_X = self.get_data_subset(dataset='X', col='Session',
                                       vals=test_ids)
         test_y = self.get_data_subset(dataset='y', col='Session',
                                       vals=test_ids)
+
         self.test_num_trials = len(test_X)
         assert len(test_y) == self.test_num_trials, (
             'Different number of trials in test X and y')
