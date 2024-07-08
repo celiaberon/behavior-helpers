@@ -189,18 +189,48 @@ class GLMHMM(ModelData):
                  num_states,
                  obs_dim: int = 1,
                  obs_kwargs: dict = None,
-                 observations: str = 'input_driven_obs',
                  transitions: str = 'standard',
                  trans_kwargs: dict = None):
 
+        '''
+        Initialize class with parameters for GLM-HMM. Below arguments are
+        parameters and definitions as found in the ssm package linked above.
+
+        Args:
+            num_states:
+                List of number of states to fit model with. Results in
+                len(num_states) models being fit.
+            obs_dim:
+                Dimensionality of the observations (e.g., 1 when only
+                predicting choice, 2 when predicting choice AND reaction time).
+            obs_kwargs:
+                'C': number of classes (choices) for output. Always 2 for 2ABT.
+                'prior_sigma': Strength of prior, defaults to 1000, where MAP
+                converges to MLE. Smaller sigma may be better in low data
+                regime.
+                'prior_mean': Defaults to 0.
+            transitions:
+                Defaults to 'standard', which is equivalent to 'stationary'.
+                Might also consider 'sticky'.
+            trans_kwargs:
+                If transitions is 'sticky', additional kwargs:
+                    'alpha': Defaults to 1.
+                    'kappa': Defaults to 100.
+                    Weights as Dir(alpha + kappa * e_k) to strengthen prior
+                    on current state k.
+        '''
+
         super().__init__()
+
+        # Observations will always be input driven observations, which allows
+        # for learning GLM weights on data.
+        self.observations = 'input_driven_obs'
 
         self.num_states = np.array(num_states)
         self.obs_dim = obs_dim  # number of observed dims, (e.g. reward, RT)
 
         # Keyword arguments passed to ssm.HMM()
         self.observation_kwargs = obs_kwargs
-        self.observations = observations
         self.transitions = transitions  # 'standard' or 'sticky'
         self.transition_kwargs = trans_kwargs
 
@@ -223,7 +253,9 @@ class GLMHMM(ModelData):
 
     def fit_cv(self, n_iters=200, pval=0.1, reps=3):
 
-        '''Fit models with CV with *pval* heldout and return LLs.'''
+        '''
+        Fit models with CV with fraction of data (pval) held out and return LLs.
+        '''
         lls = []
         scores = {'train': [], 'test': []}
         for i in self.model:
@@ -342,6 +374,14 @@ class GLMHMM(ModelData):
 
     def calc_aic(self, scores):
 
+        '''
+        Calculate Aikake Information Criterion as AIC = -2*LL/N + 2K,
+        where LL/N is the average LL per trial, and K is the number of
+        parameters in the model (penalty).
+
+        Because each state contains the same number of weights, we factor that
+        out to penalize simply by number of states.
+        '''
         aic = {}
         if 'train' in scores:
             aic['train'] = ((-2 * scores['train'] / self.train_num_trials)
@@ -352,6 +392,11 @@ class GLMHMM(ModelData):
         return aic
 
     def predict_state(self):
+
+        '''
+        Store state probability distribution for each trial (with same outer
+        dims as train/test sets) using function ssm.hmm.expected_states().
+        '''
 
         self.train_states = []
         self.test_states = []
@@ -364,6 +409,12 @@ class GLMHMM(ModelData):
 
     def pred_occupancy(self):
 
+        '''
+        Predict most likely state for each trial (as one hot encoding), and
+        calculate state occupancies as average number of trials predicted in
+        each of num_states per session.
+        '''
+
         self.train_max_prob_state = []
         self.test_max_prob_state = []
         self.train_occupancy = []
@@ -371,40 +422,66 @@ class GLMHMM(ModelData):
         self.train_occupancy_rates = []
         self.test_occupancy_rates = []
         for i in self.model:
-            state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.train_states[i]]
+            # List of which state was most likely for each trial in each session.
+            state_max_posterior = [np.argmax(posterior, axis=1)
+                                   for posterior in self.train_states[i]]
+            self.train_max_prob_state.append(state_max_posterior)
 
+            # Count number of trials in each state for each session.
             state_occupancies = np.zeros((i+1, len(self.train_states[i])))
             for idx_sess, max_post in enumerate(state_max_posterior):
                 idx, count = np.unique(max_post, return_counts=True)
                 state_occupancies[idx, idx_sess] = count.astype('float')
 
+            # Calculate average occupancy in each state over sessions.
             state_occupancies = state_occupancies.sum(axis=1) / state_occupancies.sum()
-            self.train_max_prob_state.append(state_max_posterior)
-            self.train_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
             self.train_occupancy_rates.append(state_occupancies)
 
-            state_max_posterior = [np.argmax(posterior, axis=1) for posterior in self.test_states[i]]
+            # Make one hot array predicting which state each trial is in, greedy.
+            self.train_occupancy.append([make_onehot_array(max_post)
+                                         for max_post in state_max_posterior])
+
+            # Same as above for test set.
+            state_max_posterior = [np.argmax(posterior, axis=1)
+                                   for posterior in self.test_states[i]]
+            self.test_max_prob_state.append(state_max_posterior)
+
             state_occupancies = np.zeros((i+1, len(self.test_states[i])))
             for idx_sess, max_post in enumerate(state_max_posterior):
                 idx, count = np.unique(max_post, return_counts=True)
                 state_occupancies[idx, idx_sess] = count.astype('float')
 
             state_occupancies = state_occupancies.sum(axis=1) / state_occupancies.sum()
-            self.test_max_prob_state.append(state_max_posterior)
-            self.test_occupancy.append([make_onehot_array(max_post) for max_post in state_max_posterior])
             self.test_occupancy_rates.append(state_occupancies)
+
+            self.test_occupancy.append([make_onehot_array(max_post)
+                                        for max_post in state_max_posterior])
 
     def predict_choice(self, accuracy=True, verbose=False, policy='greedy'):
 
+        '''
+        Predict choice probability based on GLM logit and underlying state
+        probabilities from HMM. Convert to binary prediction according to
+        policy, and calculate prediction accuracy if requested. For test set
+        only.
+        '''
         self.pchoice = []
         acc = []
         for i, model in self.model.items():
 
-            glm_weights = -model.observations.params
-            permutation = np.argsort(glm_weights[:, 0, 0])
+            # glm_weights = -model.observations.params  # why negative?
+            # Permutation just sorts by weight on first feature...?
+            # permutation = np.argsort(glm_weights[:, 0, 0])
 
+            # Instead, shouldn't states already be in same order as their
+            # weights?
+            permutation = [i for i in range(self.num_states[i])]
+
+            # Take state prob distributions and permute based on above.
             pred_states = np.concatenate(self.test_states[i], axis=0)
             posterior_probs = pred_states[:, permutation]
+
+            # Convert state probs to choice prob using GLM.
             pright = [np.exp(model.observations.calculate_logits(input=X))
                       for X in self.test_X]
 
@@ -422,25 +499,45 @@ class GLMHMM(ModelData):
                 pred_accuracy = np.mean(np.concatenate(self.test_y, axis=0)[:, 0] == pred_choice)
 
                 if verbose:
-                    print(f'Model with {i} state(s) has a test predictive'
+                    print(f'Model with {i} state(s) has a test predictive '
                           f'accuracy of {pred_accuracy}')
                 acc.append(pred_accuracy)
         if accuracy:
             return acc
 
-    def plot_state_probs(self, model_idx, sess_idx: int = 0,
+    def plot_state_probs(self,
+                         model_idx,
+                         sess_idx: int = 0,
                          as_occupancy: bool = False,
                          fill_state: bool = True):
 
+        '''
+        Plot state predictions for a given session.
+        Args:
+            model_idx:
+                Index of model for list of models defined by self.num_states.
+            sess_idx:
+                Index of session to plot.
+            as_occupancy:
+                If True, plot predicted state; if false, plot all state
+                probabilities per trial.
+            fill_state:
+                If True, shade trials by state occupancy.
+        '''
+
+        num_states = self.num_states[model_idx]
         if as_occupancy:
             samples = self.test_occupancy[model_idx][sess_idx]
         else:
             samples = self.test_states[model_idx][sess_idx]
 
-        fig, ax = plt.subplots(figsize=(6, 3))
-        for i in range(model_idx + 1):
+        fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
+
+        # Plot trace (probability or prediction) for each possible state.
+        for i in range(num_states + 1):
             plt.plot(samples[:, i], label=i, alpha=0.8)
 
+        # Shade predicted states between state transitions.
         if fill_state:
             state_preds = self.test_max_prob_state[model_idx][sess_idx]
             transitions = np.diff(state_preds)

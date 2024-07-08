@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import seaborn as sns
 
-from bh.utils import calc_ci, calc_sem, get_dict_item_by_idx, make_onehot_array
+from bh.utils import calc_ci, get_dict_item_by_idx
 
 
 def get_attribute(model, metric, dataset='test'):
@@ -41,9 +41,10 @@ def get_multi_mice_metrics(models, metric, **kwargs):
                 mice_metrics = np.zeros((n_mice, len(mouse_metric)))
                 dims = 2
             elif len(mouse_metric.shape) == 2:
-                mice_metrics = np.zeros((n_mice, mouse_metric.shape[0], mouse_metric.shape[1]))
+                mice_metrics = np.zeros((n_mice, mouse_metric.shape[0],
+                                         mouse_metric.shape[1]))
                 dims = 3
-        
+
         if dims == 2:
             mice_metrics[i, :] = mouse_metric
         elif dims == 3:
@@ -80,7 +81,8 @@ def plot_glm_weights(model, num_states,
 
     else:
         fig, ax = plt.subplots(nrows=num_states if multi_mice else 1,
-                               figsize=(7, 1.5*(multi_mice*1 + 1)), dpi=80, sharex=True, sharey=True)
+                               figsize=(7, 1.5*(multi_mice*1 + 1)), dpi=80,
+                               sharex=True, sharey=True, layout='constrained')
 
     if multi_mice:
         models = []
@@ -89,25 +91,25 @@ def plot_glm_weights(model, num_states,
             models.append(m_.model[model_idx])
         # weight dims: (imouse, latent state, num_features)
         weights = get_multi_mice_metrics(models, 'weights')
-        model = m_ # for convenience
+        model = m_  # for convenience
 
     c = {i: sns.color_palette()[i] for i in state_iter}
     for i, k in enumerate(state_iter):
-        ax_ = ax[i] if n_rows>1 else ax[0]
+        ax_ = ax[i] if n_rows > 1 else ax[0]
         for grp in np.arange(len(model.features), step=model.nlags):
 
             if multi_mice:
                 [ax_.plot(range(grp, grp+model.nlags),
-                     weights[imouse, k, grp:grp+model.nlags],
-                     label=None, 
-                     lw=1, color=c.get(k)) for imouse in range(weights.shape[0])]
+                          weights[imouse, k, grp:grp+model.nlags],
+                          label=None, lw=1, color=c.get(k))
+                 for imouse in range(weights.shape[0])]
                 ax_.plot(range(grp, grp+model.nlags),
-                     np.mean(weights, axis=0)[k, grp:grp+model.nlags],
-                     label=None, 
-                     lw=2, marker='o', markersize=5, color='k')
-            else: 
+                         np.mean(weights, axis=0)[k, grp:grp+model.nlags],
+                         label=None,
+                         lw=2, marker='o', markersize=5, color='k')
+            else:
                 model_idx = np.where(model.num_states == k)[0][0]
-                 # weight dims: (latent state, always zero, num_features)
+                # weight dims: (latent state, always zero, num_features)
                 weights = -model.model[model_idx].observations.params
                 ax_.plot(range(grp, grp+model.nlags),
                      weights[i, 0, grp:grp+model.nlags],
@@ -121,14 +123,14 @@ def plot_glm_weights(model, num_states,
 
     ax_.set(xlabel='Features')
     ax_.set_xticks(np.arange(len(model.features)), model.features,
-                rotation=45, fontsize=10)
+                   rotation=45, fontsize=10)
 
     if not multi_mice:
-        ax_.legend(bbox_to_anchor=(1.05,1), frameon=False)
+        ax_.legend(bbox_to_anchor=(1.05, 1), frameon=False)
 
     sns.despine()
     fig.get_layout_engine().set(w_pad=4 / 72, h_pad=4 / 72, hspace=0,
-                            wspace=0)
+                                wspace=0)
 
 
 def plot_tmat(model, num_states, ax=None):
