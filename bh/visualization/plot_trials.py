@@ -85,6 +85,7 @@ def calc_conditional_probs(trials: pd.DataFrame,
     if sortby == 'pevent':
         cond_probs = cond_probs.sort_values(by='pevent')
     elif sortby == 'history':
+        # If explicit order for histories already provided.
         horder = kwargs.get('order', None)
         if add_grps:
             other_cols = [col for col in cond_probs.columns
@@ -221,6 +222,9 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
                   ax=ax, hue=grp, **kwargs)
 
     ax.legend(bbox_to_anchor=(1, 1), loc='upper left', frameon=False)
+    ax.set(ylim=(0, 1))
+    sns.despine()
+
     return fig, ax
 
 
