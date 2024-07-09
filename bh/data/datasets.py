@@ -13,7 +13,8 @@ sys.path.append(f'{os.path.expanduser("~")}/GitHub/neural-timeseries-analysis/')
 import nta.preprocessing.quality_control as qc
 from nta.data.datasets import DataSet
 from nta.features import behavior_features as bf
-from nta.utils import load_config_variables
+from nta.utils import (cast_object_to_category, downcast_all_numeric,
+                       load_config_variables)
 
 
 class HFDataSet(DataSet):
@@ -188,6 +189,15 @@ class HFDataSet(DataSet):
         gc.collect()
 
         return multi_sessions
+
+    def check_event_order(self):
+        '''No need for only trial-based data.'''
+        pass
+
+    def downcast_dtypes(self):
+
+        self.trials = downcast_all_numeric(self.trials)
+        self.trials = cast_object_to_category(self.trials)
 
 
 class HFTrials(HFDataSet):
