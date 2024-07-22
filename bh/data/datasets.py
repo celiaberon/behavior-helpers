@@ -11,13 +11,17 @@ from tqdm import tqdm
 sys.path.append(f'{os.path.expanduser("~")}/GitHub/neural-timeseries-analysis/')
 
 import nta.preprocessing.quality_control as qc
-from nta.data.datasets import DataSet
+from nta.data.datasets import Dataset
 from nta.features import behavior_features as bf
 from nta.utils import (cast_object_to_category, downcast_all_numeric,
                        load_config_variables)
 
 
-class HFDataSet(DataSet):
+class HFDataset(Dataset):
+
+    '''
+    Full headfixed dataset class (containing trials and timeseries data).
+    '''
 
     def __init__(self,
                  mice: str | list[str],
@@ -43,11 +47,21 @@ class HFDataSet(DataSet):
 
     def set_data_path(self):
         '''Sets the path to the session data'''
-        return self.root / 'headfixed_DAB_data/preprocessed_data'
+        match self.user:
+            case 'celia':
+                prefix = self.root / 'headfixed_DAB_data'
+            case 'kevin':
+                prefix = self.root / 'headfixed_DAB_data/Kevin_data'
+        return prefix / 'preprocessed_data'
 
     def set_data_overview_path(self):
         '''Sets the path to the csv containing session summary'''
-        return self.root / 'data_overviews' / 'session_log_all_cohorts.csv'
+        match self.user:
+            case 'celia':
+                fname = 'session_log_all_cohorts.csv'
+            case 'kevin':
+                fname = 'session_log_Kevin.csv'
+        return self.root / 'data_overviews' / fname
 
     def set_session_path(self):
         '''Sets path to single session data'''
@@ -200,7 +214,7 @@ class HFDataSet(DataSet):
         self.trials = cast_object_to_category(self.trials)
 
 
-class HFTrials(HFDataSet):
+class HFTrials(HFDataset):
 
     def __init__(self,
                  mice: str | list[str],
@@ -214,6 +228,9 @@ class HFTrials(HFDataSet):
         Column updates (feature definitions, etc.) that should apply to all
         datasets.
         '''
+        # Check for state labeling consistency.
+        trials = bf.match_state_left_right(trials)
+        
         trials = bf.add_behavior_cols(trials)
         # trials = trials.rename(columns={'-1reward': 'prev_rew'})
 
