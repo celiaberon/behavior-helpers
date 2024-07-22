@@ -263,6 +263,8 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
 
 def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock', block_length=None, **kwargs):
 
+    xlabel_lut = {'iInBlock': 'Block position',
+                  'iBlock': 'Block in session'}
     # Use max block length found in data if no cutoff provided
     if block_length is None:
         # Min num trials per block pos, evaluated only to set upper limit.
@@ -276,7 +278,8 @@ def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock', block_length=No
                  bins=range(block_length + 2), multiple='stack', linewidth=0,
                  **kwargs
     )
-    ax.set(xticks=np.arange(block_length + 1, step=5), xlabel='Block position')
+    ax.set(xticks=np.arange(block_length + 1, step=5),
+           xlabel=xlabel_lut.get(x, x))
     ax.get_legend().set(bbox_to_anchor=(1.2, 1))
     sns.despine()
 
@@ -311,7 +314,7 @@ def plot_single_session(trials: pd.DataFrame,
     if (session_id is None) and (trials.Session.dropna().nunique() > 1):
         session_id = np.random.choice(trials.Session.dropna().unique())
     session = trials.query('Session==@session_id').copy()
-
+    print(session_id)
     if ntrials is None:
         ntrials = len(session)  # default is full session
 
@@ -330,12 +333,17 @@ def plot_single_session(trials: pd.DataFrame,
     bidx = session.query('iInBlock == 0').index
     if bidx[0] > 1:
         bidx = np.insert(bidx, 0, 0)
-    if bidx[-1] != len(session):
-        bidx = np.insert(bidx, len(bidx), len(session))
+    if bidx[-1] != tstop:
+        bidx = np.insert(bidx, len(bidx), tstop)
+    assert all(np.diff(bidx)) > 0, (
+        'block transitions must monotonically increase')
 
     fig, ax = plt.subplots(figsize=[7.5, 1.3])
+    first_state = session.State.iloc[0].item()
     # Iterate over blocks and shade odd blocks only (left blocks).
     for bstart, bstop in zip(bidx[:-1], bidx[1:]):
+        # bstop is first trial of next block, gets offset below.
+        # Skip blocks where State == 1 to "shade" them white.
         if session.loc[bstop - 1, 'State'] % 2 == 0:
             continue
         ax.fill_betweenx([-1, 3.], bstart - 0.5, bstop - 0.5,
