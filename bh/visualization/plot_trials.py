@@ -138,10 +138,15 @@ def plot_sequences(cond_probs: pd.DataFrame,
     yval = kwargs.get('yval', 'pevent')
     hue = kwargs.get('hue', [])
 
-    if cond_probs.history.nunique() < 10:
-        fig, ax = plt.subplots(figsize=(4.2, 2.5))
+    if kwargs.get('ax', None) is None:
+        fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
+        if cond_probs.history.nunique() < 10:
+            fig, ax = plt.subplots(figsize=(4.2, 2.5))
+        else:
+            fig, ax = plt.subplots(figsize=(10, 2.5))
     else:
-        fig, ax = plt.subplots(figsize=(10, 2.5))
+        ax = kwargs.pop('ax')
+        fig = None
 
     if hue:
         err_col = 'err_pos'  # column to contain x position values
@@ -232,6 +237,7 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
                             htrials: int = 1,
                             pred_col: str = '+1switch',
                             grp: str = 'Mouse',
+                            ax = None,
                             **kwargs):
 
     '''
@@ -245,7 +251,7 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
                                              pred_col=pred_col,
                                              sortby='pevent')
     x_histories = pooled_policies.history.values
-    fig, ax = plot_sequences(pooled_policies, alpha=0.5, title='')
+    fig, ax = plot_sequences(pooled_policies, alpha=0.5, title='', ax=ax)
 
     # Calculate subgroup policies that will be plotted as points overlaying
     # aggregate data bars.
@@ -261,23 +267,30 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
     return fig, ax
 
 
-def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock', block_length=None, **kwargs):
+def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock',
+                            block_length=None, multiple='stack', **kwargs):
 
     xlabel_lut = {'iInBlock': 'Block position',
                   'iBlock': 'Block in session'}
+
     # Use max block length found in data if no cutoff provided
+
     if block_length is None:
         # Min num trials per block pos, evaluated only to set upper limit.
         min_trials = kwargs.pop('min_trials', 1)
-        block_length = (trials.groupby(x, observed=True)
-                              .filter(lambda x: len(x) > min_trials)[x].max())
+        block_length = int(trials.groupby(x, observed=True)
+                                 .filter(lambda v: len(v) > min_trials)[x].max())
     trials_ = trials.query(f'{x}.between(0, @block_length)').sort_values(by=sortby)
 
-    fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
+    if kwargs.get('ax', None) is None:
+        fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
+    else:
+        ax = kwargs.pop('ax')
+        fig = None
+
     sns.histplot(data=trials_, x=x, hue='seq2', ax=ax, stat='proportion',
-                 bins=range(block_length + 2), multiple='stack', linewidth=0,
-                 **kwargs
-    )
+                 bins=range(block_length + 2), multiple=multiple, linewidth=0,
+                 **kwargs)
     ax.set(xticks=np.arange(block_length + 1, step=5),
            xlabel=xlabel_lut.get(x, x))
     ax.get_legend().set(bbox_to_anchor=(1.2, 1))
@@ -454,9 +467,13 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
                          'Switch': ('P(switch)', (0, 0.4))}
 
     n_plots = len(plot_features.keys())
-    fig, axs = plt.subplots(ncols=n_plots, figsize=(3.6 * n_plots, 2.4),
-                            layout='constrained')
 
+    if kwargs.get('ax', None) is None:
+        fig, axs = plt.subplots(ncols=n_plots, figsize=(3.6 * n_plots, 2.4),
+                                layout='constrained')
+    else:
+        axs = kwargs.pop('ax')
+        fig = None
     if isinstance(axs, plt.Axes):
         axs = [axs]
     for i, (metric, ax_vars) in enumerate(plot_features.items()):
