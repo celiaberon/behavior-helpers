@@ -1,6 +1,7 @@
 import gc
 import getpass
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -39,29 +40,44 @@ class HFDataset(Dataset):
 
     def set_root(self):
         '''Sets the root path for the dataset'''
-        if 'celia' in getpass.getuser().lower():
+        if ('celia' in getpass.getuser().lower()) & (self.user != 'ally'):
             root = Path('/Volumes/Neurobio/MICROSCOPE/Celia/data/lickTask/')
+        elif self.user == 'ally':
+            root = Path('/Volumes/Neurobio/MICROSCOPE/Ally/Ally_photometry/dLight')
         else:
             raise NotImplementedError('Need path for user with HFDataSet')
         return root
+
+    def set_config_path(self):
+        if ('celia' in getpass.getuser().lower()) & (self.user != 'ally'):
+            return self.root
+        elif self.user == 'ally':
+            return Path('/Volumes/Neurobio/MICROSCOPE/Celia/data/lickTask/')
+        else:
+            raise NotImplementedError('Need path for user with HFDataSet')
 
     def set_data_path(self):
         '''Sets the path to the session data'''
         match self.user:
             case 'celia':
-                prefix = self.root / 'headfixed_DAB_data'
+                data_path = self.root / 'headfixed_DAB_data/preprocessed_data'
             case 'kevin':
-                prefix = self.root / 'headfixed_DAB_data/Kevin_data'
-        return prefix / 'preprocessed_data'
+                data_path = self.root / 'headfixed_DAB_data/Kevin_data/preprocessed_data'
+            case 'ally':
+                data_path = self.root / 'output_ally_spect_demod_60sec_rolling'
+
+        return data_path
 
     def set_data_overview_path(self):
         '''Sets the path to the csv containing session summary'''
         match self.user:
             case 'celia':
-                fname = 'session_log_all_cohorts.csv'
+                log_path = self.root / 'data_overviews' / 'session_log_all_cohorts.csv'
             case 'kevin':
-                fname = 'session_log_Kevin.csv'
-        return self.root / 'data_overviews' / fname
+                log_path = self.root / 'data_overviews' / 'session_log_Kevin.csv'
+            case 'ally':
+                log_path = self.data_path / 'session_log_Ally.csv'
+        return log_path
 
     def set_session_path(self):
         '''Sets path to single session data'''
@@ -80,25 +96,25 @@ class HFDataset(Dataset):
     def load_color_palettes(self):
 
         '''Load standard color palettes for plotting'''
-        palettes = load_config_variables(self.root)
+        palettes = load_config_variables(self.config_path)
         return palettes
 
-    def update_columns(self, trials, ts):
+    # def update_columns(self, trials, ts):
 
-        '''
-        Column updates (feature definitions, etc.) that should apply to all
-        datasets.
-        '''
-        trials, ts = bf.add_behavior_cols(trials, ts)
-        trials = trials.rename(columns={'-1reward': 'prev_rew'})
+    #     '''
+    #     Column updates (feature definitions, etc.) that should apply to all
+    #     datasets.
+    #     '''
+    #     trials, ts = bf.add_behavior_cols(trials, ts)
+    #     trials = trials.rename(columns={'-1reward': 'prev_rew'})
 
-        # Rectify error in penalty state allocation.
-        ts['ENL'] = ts['ENL'] + ts['state_ENLP']  # recover original state
-        ts['Cue'] = ts['Cue'] + ts['CueP']  # recover original state
-        ts = bf.split_penalty_states(ts, penalty='ENLP')
-        ts = bf.split_penalty_states(ts, penalty='CueP')
+    #     # Rectify error in penalty state allocation.
+    #     ts['ENL'] = ts['ENL'] + ts['state_ENLP']  # recover original state
+    #     ts['Cue'] = ts['Cue'] + ts['CueP']  # recover original state
+    #     ts = bf.split_penalty_states(ts, penalty='ENLP')
+    #     ts = bf.split_penalty_states(ts, penalty='CueP')
 
-        return trials, ts
+    #     return trials, ts
 
     def set_timeseries_path(self):
         '''Set path to timeseries data file.'''
@@ -106,22 +122,14 @@ class HFDataset(Dataset):
         ts_path = file_path / f'{self.mouse_}_analog_filled.csv'
         return ts_path
 
-    def load_session_data(self):
-        '''Loads data from single session'''
-        trials_path = self.set_trials_path()
-        ts_path = self.set_timeseries_path()
-
-        if not (ts_path.exists() & trials_path.exists()):
-            if self.verbose:
-                print(f'skipped {self.mouse_} {self.session_}')
-            return None, None
+    def define_data_dtypes(self):
 
         trial_dtypes = {
             'nTrial': np.int32,
             'Mouse': 'object',
             'Date': 'object',
             'Session': 'object',
-            'Condition': np.int16,
+            'Condition': 'object',
             'tSelection': np.int16,
             'direction': np.float32,
             'Reward': np.float32,
@@ -137,10 +145,6 @@ class HFDataset(Dataset):
             'timeout': 'bool',
             'Switch': np.float32
         }
-
-        usecols = list(trial_dtypes.keys())
-        trials = pd.read_csv(trials_path, index_col=None, dtype=trial_dtypes,
-                             usecols=usecols)
 
         ts_dtypes = {
             'nTrial': np.float32,
@@ -162,8 +166,53 @@ class HFDataset(Dataset):
             'trial_clock': 'float'
         }
 
+        return trial_dtypes, ts_dtypes
+
+    def load_session_data(self):
+        '''Loads data from single session'''
+        trials_path = self.set_trials_path()
+        ts_path = self.set_timeseries_path()
+
+        if not (ts_path.exists() & trials_path.exists()):
+            if self.verbose:
+                print(f'skipped {self.mouse_} {self.session_}')
+            return None, None
+
+        trial_dtypes, ts_dtypes = self.define_data_dtypes()
+
+        usecols = list(trial_dtypes.keys())
+        trials = pd.read_csv(trials_path, index_col=None, dtype=trial_dtypes,
+                             usecols=usecols)
+
         usecols = list(ts_dtypes.keys())
-        ts = pd.read_csv(ts_path, index_col=None, usecols=usecols, dtype=ts_dtypes)
+
+        # Load timeseries data but be forgiving about missing columns.
+        while usecols:
+            try:
+                ts = pd.read_csv(ts_path, index_col=None,
+                                 usecols=usecols, dtype=ts_dtypes)
+                # Create session column to match across dataframes.
+                if 'session' in ts.columns:
+                    ts = ts.rename(columns={'session': 'Session'})
+                return ts, trials
+            except ValueError as e:
+                # Extract the missing column name from the error message.
+                re_match = [re.search(r'\((.*?)\)|"(.*?)"', str(e)),
+                            re.search(r"'(.+)'", str(e))]
+                re_match = [s for s in re_match if s is not None]
+
+                for s in re_match:
+                    if isinstance(s, re.Match) & (s.group(1) in usecols):
+                        missing_col = s.group(1)
+                        if missing_col == 'session':
+                            ts_dtypes['Session'] = ts_dtypes.pop('session')
+                            usecols.append('Session')
+                        usecols.remove(missing_col)
+                        break
+                else:
+                    # In the case we can't find missing column.
+                    raise e
+        raise ValueError('All specified columns missing from parquet file.')
 
         return ts, trials
 
@@ -193,11 +242,8 @@ class HFDataset(Dataset):
             multi_sessions = self.concat_sessions(sub_sessions=trials_matched,
                                                   full_sessions=multi_sessions)
 
-            n_sessions_mouse = (multi_sessions['trials']
-                                .query(f'Mouse == {self.mouse_} & nTrial > 1')['Session']
-                                .nunique())
-            if (self.session_cap is not None) and (n_sessions_mouse >= self.session_cap):
-                break
+            if self.at_session_cap(multi_sessions): break
+
         # TODO: QC all mice sessions by ENL penalty rate set per mouse
 
         gc.collect()
@@ -230,7 +276,6 @@ class HFTrials(HFDataset):
         '''
         # Check for state labeling consistency.
         trials = bf.match_state_left_right(trials)
-        
         trials = bf.add_behavior_cols(trials)
         # trials = trials.rename(columns={'-1reward': 'prev_rew'})
 
@@ -243,13 +288,10 @@ class HFTrials(HFDataset):
     def load_session_data(self):
         '''Loads data from single session'''
         trials_path = self.set_trials_path()
-
         if not trials_path.exists():
             if self.verbose: print(f'skipped {self.mouse_} {self.session_}')
             return None, None
-
         trials = pd.read_csv(trials_path, index_col=0)
-
         return trials
 
     def get_max_trial(self, full_sessions: dict) -> int:
@@ -339,3 +381,25 @@ class HFTrials(HFDataset):
 
         '''Lazy workaround for inheriting from timeseries dataset'''
         pass
+
+
+class HFTrialsDeterministic(HFTrials):
+
+    def __init__(self,
+                 mice: str | list[str],
+                 **kwargs):
+
+        super().__init__(mice, **kwargs)
+
+    def update_columns(self, trials):
+
+        '''
+        Column updates (feature definitions, etc.) that should apply to all
+        datasets.
+        '''
+        # Check for state labeling consistency.
+        # trials = bf.match_state_left_right(trials)
+        trials = bf.add_behavior_cols(trials)
+        # trials = trials.rename(columns={'-1reward': 'prev_rew'})
+
+        return trials
