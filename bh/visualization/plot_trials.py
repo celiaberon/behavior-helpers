@@ -139,11 +139,11 @@ def plot_sequences(cond_probs: pd.DataFrame,
     hue = kwargs.get('hue', [])
 
     if kwargs.get('ax', None) is None:
-        fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
+        # fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
         if cond_probs.history.nunique() < 10:
-            fig, ax = plt.subplots(figsize=(4.2, 2.5))
+            fig, ax = plt.subplots(figsize=(4.2, 2.5), layout='constrained')
         else:
-            fig, ax = plt.subplots(figsize=(10, 2.5))
+            fig, ax = plt.subplots(figsize=(10, 2.5), layout='constrained')
     else:
         ax = kwargs.pop('ax')
         fig = None
@@ -178,7 +178,6 @@ def plot_sequences(cond_probs: pd.DataFrame,
     ax.set(xlim=(-1, len(cond_probs) // (any(hue) + 1)), ylim=(0, 1),
            ylabel=kwargs.get('ylab', 'P(switch)'),
            title=kwargs.get('title', None))
-    plt.tight_layout()
     sns.despine()
 
     if overlay_label:

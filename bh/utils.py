@@ -83,4 +83,4 @@ def check_leg_duplicates(ax):
     legend_reduced = dict(zip(lab, h))
     ax.legend(legend_reduced.values(), legend_reduced.keys(),
               bbox_to_anchor=(0.8, 1), edgecolor='white')
-    plt.tight_layout()
+    # plt.tight_layout()
