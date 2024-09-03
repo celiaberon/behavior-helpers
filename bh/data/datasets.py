@@ -38,47 +38,6 @@ class HFDataset(Dataset):
         self.cohort = None
         self.palettes = self.load_color_palettes()
 
-    def set_root(self):
-        '''Sets the root path for the dataset'''
-        if ('celia' in getpass.getuser().lower()) & (self.user != 'ally'):
-            root = Path('/Volumes/Neurobio/MICROSCOPE/Celia/data/lickTask/')
-        elif self.user == 'ally':
-            root = Path('/Volumes/Neurobio/MICROSCOPE/Ally/Ally_photometry/dLight')
-        else:
-            raise NotImplementedError('Need path for user with HFDataSet')
-        return root
-
-    def set_config_path(self):
-        if ('celia' in getpass.getuser().lower()) & (self.user != 'ally'):
-            return self.root
-        elif self.user == 'ally':
-            return Path('/Volumes/Neurobio/MICROSCOPE/Celia/data/lickTask/')
-        else:
-            raise NotImplementedError('Need path for user with HFDataSet')
-
-    def set_data_path(self):
-        '''Sets the path to the session data'''
-        match self.user:
-            case 'celia':
-                data_path = self.root / 'headfixed_DAB_data/preprocessed_data'
-            case 'kevin':
-                data_path = self.root / 'headfixed_DAB_data/Kevin_data/preprocessed_data'
-            case 'ally':
-                data_path = self.root / 'output_ally_spect_demod_60sec_rolling'
-
-        return data_path
-
-    def set_data_overview_path(self):
-        '''Sets the path to the csv containing session summary'''
-        match self.user:
-            case 'celia':
-                log_path = self.root / 'data_overviews' / 'session_log_all_cohorts.csv'
-            case 'kevin':
-                log_path = self.root / 'data_overviews' / 'session_log_Kevin.csv'
-            case 'ally':
-                log_path = self.data_path / 'session_log_Ally.csv'
-        return log_path
-
     def set_session_path(self):
         '''Sets path to single session data'''
         return self.data_path / self.mouse_ / self.session_
@@ -381,25 +340,3 @@ class HFTrials(HFDataset):
 
         '''Lazy workaround for inheriting from timeseries dataset'''
         pass
-
-
-class HFTrialsDeterministic(HFTrials):
-
-    def __init__(self,
-                 mice: str | list[str],
-                 **kwargs):
-
-        super().__init__(mice, **kwargs)
-
-    def update_columns(self, trials):
-
-        '''
-        Column updates (feature definitions, etc.) that should apply to all
-        datasets.
-        '''
-        # Check for state labeling consistency.
-        # trials = bf.match_state_left_right(trials)
-        trials = bf.add_behavior_cols(trials)
-        # trials = trials.rename(columns={'-1reward': 'prev_rew'})
-
-        return trials
