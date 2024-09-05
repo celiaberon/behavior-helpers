@@ -28,8 +28,6 @@ class HFDataset(Dataset):
                  mice: str | list[str],
                  **kwargs):
 
-        assert 'celia' in getpass.getuser().lower(), (
-            'Please write your own DataSet class')
         super().__init__(mice, **kwargs)
 
         self.qc_photo = None  # behavior only
@@ -57,23 +55,6 @@ class HFDataset(Dataset):
         '''Load standard color palettes for plotting'''
         palettes = load_config_variables(self.config_path)
         return palettes
-
-    # def update_columns(self, trials, ts):
-
-    #     '''
-    #     Column updates (feature definitions, etc.) that should apply to all
-    #     datasets.
-    #     '''
-    #     trials, ts = bf.add_behavior_cols(trials, ts)
-    #     trials = trials.rename(columns={'-1reward': 'prev_rew'})
-
-    #     # Rectify error in penalty state allocation.
-    #     ts['ENL'] = ts['ENL'] + ts['state_ENLP']  # recover original state
-    #     ts['Cue'] = ts['Cue'] + ts['CueP']  # recover original state
-    #     ts = bf.split_penalty_states(ts, penalty='ENLP')
-    #     ts = bf.split_penalty_states(ts, penalty='CueP')
-
-    #     return trials, ts
 
     def set_timeseries_path(self):
         '''Set path to timeseries data file.'''
@@ -131,6 +112,7 @@ class HFDataset(Dataset):
         '''Loads data from single session'''
         trials_path = self.set_trials_path()
         ts_path = self.set_timeseries_path()
+        print(ts_path, '\n', trials_path)
 
         if not (ts_path.exists() & trials_path.exists()):
             if self.verbose:
@@ -189,7 +171,10 @@ class HFDataset(Dataset):
             self.session_ = session_date
 
             ts, trials = self.load_session_data()
-            if ts is None: continue
+            if ts is None:
+                continue
+
+            trials, ts = self.custom_update_columns(trials, ts)
             trials, ts = self.update_columns(trials, ts)
 
             # Trial level quality control needs to come at the end.
