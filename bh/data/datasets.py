@@ -112,7 +112,6 @@ class HFDataset(Dataset):
         '''Loads data from single session'''
         trials_path = self.set_trials_path()
         ts_path = self.set_timeseries_path()
-        print(ts_path, '\n', trials_path)
 
         if not (ts_path.exists() & trials_path.exists()):
             if self.verbose:
@@ -154,8 +153,7 @@ class HFDataset(Dataset):
                     # In the case we can't find missing column.
                     raise e
         raise ValueError('All specified columns missing from parquet file.')
-
-        return ts, trials
+        # return ts, trials
 
     def read_multi_sessions(self,
                             qc_params,
@@ -313,6 +311,7 @@ class HFTrials(HFDataset):
             trials = self.load_session_data()
             if trials is None: continue
 
+            trials = self.custom_update_columns(trials)
             trials = self.update_columns(trials)
             multi_sessions = self.concat_sessions(sub_sessions={'trials': trials},
                                                   full_sessions=multi_sessions)
