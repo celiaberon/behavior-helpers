@@ -223,6 +223,10 @@ class HFTrials(HFDataset):
 
         return trials
 
+    def custom_update_columns(self, trials):
+        '''Column updates that are dataset-specific.'''
+        return trials
+
     def set_timeseries_path(self):
         '''Set path to timeseries data file.'''
         pass
@@ -232,7 +236,7 @@ class HFTrials(HFDataset):
         trials_path = self.set_trials_path()
         if not trials_path.exists():
             if self.verbose: print(f'skipped {self.mouse_} {self.session_}')
-            return None, None
+            return None
         trials = pd.read_csv(trials_path, index_col=0)
         return trials
 
@@ -310,7 +314,6 @@ class HFTrials(HFDataset):
 
             trials = self.load_session_data()
             if trials is None: continue
-
             trials = self.custom_update_columns(trials)
             trials = self.update_columns(trials)
             multi_sessions = self.concat_sessions(sub_sessions={'trials': trials},
