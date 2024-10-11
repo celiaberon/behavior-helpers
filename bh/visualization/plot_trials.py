@@ -220,7 +220,7 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
 
     if 'size' not in kwargs:
         # Point size as function of number of points.
-        kwargs['size'] = 20 / cond_probs[grp].nunique()
+        kwargs['size'] = np.min((5, 20 / cond_probs[grp].nunique()))
 
     sns.swarmplot(data=cond_probs.sort_values(by=grp), x='history', y=yval,
                   ax=ax, hue=grp, **kwargs)
@@ -245,10 +245,13 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
     '''
 
     # Calculate aggregate policies and plot conditional probs as barplot.
+    x_histories = kwargs.pop('x_histories', None)
     pooled_policies = calc_conditional_probs(trials,
                                              htrials,
                                              pred_col=pred_col,
-                                             sortby='pevent')
+                                             sortby='history' if any(x_histories)
+                                                    else 'pevent',
+                                             order=x_histories)
     x_histories = pooled_policies.history.values
     fig, ax = plot_sequences(pooled_policies, alpha=0.5, title='', ax=ax)
 
