@@ -33,8 +33,6 @@ class HFDataset(Dataset):
         self.qc_photo = None  # behavior only
         self.channels = None  # behavior only
         self.sig_channels = None  # behavior only
-        self.cohort = None
-        self.palettes = self.load_color_palettes()
 
     def set_session_path(self):
         '''Sets path to single session data'''
@@ -46,15 +44,6 @@ class HFDataset(Dataset):
         if not os.path.exists(os.path.join(save_path, 'metadata')):
             os.makedirs(os.path.join(save_path, 'metadata'))
         return save_path
-
-    def load_cohort_dict(self):
-        pass
-
-    def load_color_palettes(self):
-
-        '''Load standard color palettes for plotting'''
-        palettes = load_config_variables(self.config_path)
-        return palettes
 
     def set_timeseries_path(self):
         '''Set path to timeseries data file.'''
@@ -74,7 +63,7 @@ class HFDataset(Dataset):
             'direction': np.float32,
             'Reward': np.float32,
             'T_ENL': np.int16,
-            'n_ENL': np.int8,
+            'n_ENL': np.int16,
             'n_Cue': np.int8,
             'State': np.float32,
             'selHigh': np.float32,
@@ -200,6 +189,24 @@ class HFDataset(Dataset):
 
         self.trials = downcast_all_numeric(self.trials)
         self.trials = cast_object_to_category(self.trials)
+
+    def update_columns(self, trials, ts):
+
+        # Check for state labeling consistency.
+        trials = bf.match_state_left_right(trials)
+
+        # Add standard set of analysis columns.
+        trials, ts = bf.add_behavior_cols(trials, ts)
+        trials = trials.rename(columns={'-1reward': 'prev_rew'})
+
+        # Rectify error in penalty state allocation.
+        ts['ENL'] = ts['ENL'] + ts['state_ENLP'] + ts.get('state_ENL_preCueP', 0)  # recover original state
+        ts['Cue'] = ts['Cue'] + ts['CueP']  # recover original state
+        ts = bf.split_penalty_states(ts, penalty='ENLP')
+        ts = bf.split_penalty_states(ts, penalty='CueP')
+        ts = bf.split_penalty_states(ts, penalty='CueP', cuep_ref_enl=True)
+
+        return trials, ts
 
 
 class HFTrials(HFDataset):
