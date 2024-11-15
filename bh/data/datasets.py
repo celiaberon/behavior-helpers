@@ -1,42 +1,109 @@
 import gc
-import getpass
+# import getpass
 import os
 import re
 import sys
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from tqdm import tqdm
 
 sys.path.append(f'{os.path.expanduser("~")}/GitHub/neural-timeseries-analysis/')
 
 import nta.preprocessing.quality_control as qc
-from nta.data.datasets import Dataset
 from nta.features import behavior_features as bf
 from nta.utils import (cast_object_to_category, downcast_all_numeric,
                        load_config_variables)
 
 
-class HFDataset(Dataset):
-
-    '''
-    Full headfixed dataset class (containing trials and timeseries data).
-    '''
+class HFTrials(ABC):
 
     def __init__(self,
                  mice: str | list[str],
-                 **kwargs):
+                 user: str = 'celia',
+                 verbose: bool = False,
+                 label: str = '',
+                 save: bool = True,
+                 qc_params: dict = {},
+                 add_cols: dict[set] = {},
+                 session_cap: int = None,
+                 ):
 
-        super().__init__(mice, **kwargs)
+        self.mice = mice
+        self.user = user
+        self.verbose = verbose
+        self.label = label if label else self.mice
+        self.session_cap = session_cap  # max number of sessions per mouse
+        self.qc_params = qc_params
+        self.trls_add_cols = add_cols.get('trials', set())
 
-        self.qc_photo = None  # behavior only
-        self.channels = None  # behavior only
-        self.sig_channels = None  # behavior only
+        # Set up paths and standard attributes.
+        self.root = self.set_root()
+        self.config_path = self.set_config_path()
+        self.data_path = self.set_data_path()
+        self.summary_path = self.set_data_overview_path()
+        self.save = save
+        if self.save:
+            self.save_path = self.set_save_path()
+        self.cohort = self.load_cohort_dict()
+        self.palettes = load_config_variables(self.config_path)
+        self.add_mouse_palette()
+
+        self.trials = pd.DataFrame()
+
+    def load_data(self):
+
+        # Load all data.
+        if not isinstance(self.mice, list):
+            self.mouse_ = self.mice
+            multi_sessions = self.read_multi_sessions(self.qc_params)
+            self.trials = multi_sessions.get('trials')
+        else:
+            multi_mice = self.read_multi_mice(self.qc_params, keys=['trials'])
+            # Store data from multi_mice as attributes of dataset.
+            self.trials = multi_mice.get('trials')
+
+        print(f'{self.trials.Session.nunique()} total sessions loaded in')
+
+        self.trials = bf.order_sessions(self.trials)
+
+        # Downcast datatypes to make more memory efficient.
+        self.downcast_dtypes()
+
+        gc.collect()
+
+    @abstractmethod
+    def set_root(self):
+        '''Sets the root path for the dataset'''
+        pass
+
+    @abstractmethod
+    def set_config_path(self):
+        '''Sets the path to config file'''
+        pass
+
+    @abstractmethod
+    def set_data_path(self):
+        '''Sets the path to the session data'''
+        pass
+
+    @abstractmethod
+    def set_data_overview_path(self):
+        '''Sets the path to the csv containing session summary'''
+        pass
 
     def set_session_path(self):
         '''Sets path to single session data'''
         return self.data_path / self.mouse_ / self.session_
+
+    def set_trials_path(self):
+        '''Set path to trial-level data file.'''
+        file_path = self.set_session_path()
+        trials_path = file_path / f'{self.mouse_}_trials.csv'
+        return trials_path
 
     def set_save_path(self):
         '''Set save path and create the directory.'''
@@ -45,13 +112,63 @@ class HFDataset(Dataset):
             os.makedirs(os.path.join(save_path, 'metadata'))
         return save_path
 
-    def set_timeseries_path(self):
-        '''Set path to timeseries data file.'''
-        file_path = self.set_session_path()
-        ts_path = file_path / f'{self.mouse_}_analog_filled.csv'
-        return ts_path
+    def load_cohort_dict(self):
+        '''Load lookup table for sensor expressed in each mouse of cohort.'''
+        cohort = load_config_variables(self.config_path, 'cohort')['cohort']
+        cohort = {k: cohort.get(k) for k in self.mice}
+        return cohort
 
-    def define_data_dtypes(self):
+    def add_mouse_palette(self):
+        '''Set up some consistent mapping to distinguish mice in plots.'''
+        pal = sns.color_palette('deep', n_colors=len(self.mice))
+        self.palettes['mouse_pal'] = {mouse: color for mouse, color
+                                      in zip(self.mice, pal)}
+
+    def sessions_to_load(self,
+                         probs: int | str = 9010,
+                         QC_pass: bool = True,
+                         **kwargs) -> list:
+
+        '''
+        Make list of sessions to include for designated mouse
+
+        Args:
+            probs:
+                Filter bandit data by probability conditions.
+            QC_pass:
+                Whether to take sessions passing quality control (True) or
+                failing (False).
+
+        Returns:
+            dates_list:
+                List of dates to load in for mouse, sorted from earliest to
+                latest.
+        '''
+
+        # Read in session log.
+        session_log = pd.read_csv(self.summary_path)
+
+        # Format inputs/args correctly.
+        if not isinstance(QC_pass, list):
+            QC_pass = [QC_pass]
+        if isinstance(probs, list):
+            probs = [str(p) for p in probs]
+        else:
+            probs = [str(probs)]
+
+        # Compose query.
+        session_log_mouse = session_log.query(f'Mouse == "{self.mouse_}" \
+                                              & Condition.isin({probs})')
+        q = f'Mouse == "{self.mouse_}" & Condition.isin({probs}) \
+            & N_valid_trials > {kwargs.get("min_num_trials", 100)} \
+            & Pass.isin({QC_pass})' + kwargs.get("query", '')
+        session_log = session_log.query(q)
+        if self.verbose:
+            print(f'{self.mouse_}: {len(session_log)} of',
+                  f' {len(session_log_mouse)} sessions meet criteria')
+        return sorted(list(set(session_log.Date.values)))
+
+    def define_trial_dtypes(self):
 
         trial_dtypes = {
             'nTrial': np.int32,
@@ -75,6 +192,248 @@ class HFDataset(Dataset):
             'Switch': np.float32
         }
 
+        return trial_dtypes
+
+    def load_trial_data(self):
+        '''Loads trial data from single session'''
+        trials_path = self.set_trials_path()
+
+        if not trials_path.exists():
+            if self.verbose:
+                print(f'skipped {self.mouse_} {self.session_}')
+            return None
+
+        trial_dtypes = self.define_trial_dtypes()
+
+        usecols = list(trial_dtypes.keys()) + list(self.trls_add_cols)
+        trials = pd.read_csv(trials_path, index_col=None, dtype=trial_dtypes,
+                             usecols=usecols)  # index_col=0?
+        return trials
+
+    def load_session_data(self):
+        return self.load_trial_data()
+
+    def get_max_trial(self, full_sessions: dict, keys=['trials', 'ts']) -> int:
+
+        '''
+        Get maximum trial ID to use for unique trial ID assignment.
+        Importantly, also confirm that max trial matches between dataframes.
+
+        Args:
+            full_sessions:
+                Dictionary containing and trial- and possibly timeseries-based data.
+
+        Returns:
+            max_trial:
+                Number corresponding to maximum trial value.
+        '''
+
+        try:
+            max_df_trial = [full_sessions[key].nTrial.max() for key in keys]
+            if len(max_df_trial) > 1:
+                assert np.allclose(*max_df_trial, rtol=0)
+            max_trial = max_df_trial[0]
+        except AttributeError:
+            max_trial = 0
+        return max_trial
+
+    def at_session_cap(self, multi_sessions):
+
+        ''''
+        Check whether number of sessions for a given mouse has reached a given
+        session cap (max number of sessions per mouse to load). If no session
+        cap provided, return false and load all data.
+        '''
+
+        if self.session_cap is None:
+            return False
+
+        if multi_sessions['trials'].Session.nunique() >= self.session_cap:
+            return True
+
+        return False
+
+    def concat_sessions(self,
+                        *,
+                        sub_sessions: dict = None,
+                        full_sessions: dict = None):
+
+        '''
+        Aggregate multiple sessions by renumbering trials to provide unique
+        trial ID for each trial. Store original id in separate column.
+
+        Args:
+            sub_sessions:
+                Smaller unit to be concatenated onto growing aggregate df.
+            full_sessions:
+                Core larger unit updated with aggregating data.
+
+        Returns:
+            full_sessions:
+                Original full_sessions data now containing sub_sessions data.
+        '''
+
+        max_trial = self.get_max_trial(full_sessions,
+                                       keys=list(full_sessions.keys()))
+
+        # Iterate over both trial and timeseries data.
+        for key, ss_vals in sub_sessions.items():
+
+            # Store original trial ID before updating with unique value.
+            if 'nTrial_orig' not in ss_vals.columns:
+                ss_vals['nTrial_orig'] = ss_vals['nTrial'].copy()
+
+            # Create session column to match across dataframes.
+            if 'Session' not in ss_vals.columns:
+                ss_vals['Session'] = '_'.join([self.mouse_, self.session_])
+
+            # Add max current trial value to all new trials before concat.
+            tmp_copy = ss_vals.copy()
+            tmp_copy['nTrial'] += max_trial
+            full_sessions[key] = pd.concat((full_sessions[key], tmp_copy))
+            full_sessions[key] = full_sessions[key].reset_index(drop=True)
+
+        # Assert that new dataframes have matching max trial ID.
+        _ = self.get_max_trial(full_sessions, keys=list(full_sessions.keys()))
+
+        return full_sessions
+
+    def read_multi_mice(self,
+                        qc_params,
+                        df_keys: list[str] = ['trials', 'ts'],
+                        **kwargs):
+
+        '''
+        Load in sessions by mouse and concatenate into one large dataframe
+        keeping every trial id unique.
+
+        Args:
+            mice:
+                List of mice from which to load data.
+            root:
+                Path to root directory containing Mouse data folder.
+
+        Returns:
+            multi_mice (dict):
+                {'trials': trials data, 'timeseries': timeseries data}
+        '''
+
+        multi_mice = {key: pd.DataFrame() for key in df_keys}
+
+        for mouse in self.mice:
+            self.mouse_ = mouse
+            multi_sessions = self.read_multi_sessions(qc_params, **kwargs)
+
+            if len(multi_sessions.get('trials')) < 1:
+                continue  # skip mouse if no sessions returned
+
+            multi_mice = self.concat_sessions(sub_sessions=multi_sessions,
+                                              full_sessions=multi_mice)
+
+        # self.trials = multi_mice.get('trials')
+        return multi_mice
+
+    def read_multi_sessions(self,
+                            qc_params,
+                            **kwargs) -> dict:
+
+        sessions = self.sessions_to_load(**qc_params)
+        multi_sessions = {key: pd.DataFrame() for key in ['trials']}
+
+        # Loop through files to be processed
+        for session_date in tqdm(sessions, self.mouse_, disable=False):
+
+            if self.verbose: print(session_date)
+            self.session_ = session_date
+
+            trials = self.load_session_data()
+            if trials is None: continue
+            trials = self.custom_update_columns(trials)
+            trials = self.update_columns(trials)
+            trials = self.cleanup_cols(trials)
+            multi_sessions = self.concat_sessions(sub_sessions={'trials': trials},
+                                                  full_sessions=multi_sessions)
+
+
+        # TODO: QC all mice sessions by ENL penalty rate set per mouse
+
+        return multi_sessions
+
+    def update_columns(self, trials):
+
+        '''
+        Column updates (feature definitions, etc.) that should apply to all
+        datasets.
+        '''
+        # Check for state labeling consistency.
+        trials = bf.match_state_left_right(trials)
+        trials = bf.add_behavior_cols(trials)
+        # trials = trials.rename(columns={'-1reward': 'prev_rew'})
+
+        return trials
+
+    def custom_update_columns(self, trials):
+        '''Column updates that are dataset-specific.'''
+        return trials
+
+    def cleanup_cols(self, dfs: dict | pd.DataFrame):
+        '''Remove unnecessary columns to minimize memory usage.'''
+        return dfs
+
+    def downcast_dtypes(self):
+
+        self.trials = downcast_all_numeric(self.trials)
+        self.trials = cast_object_to_category(self.trials)
+
+
+class HFDataset(HFTrials):
+
+    '''
+    Full headfixed dataset class (containing trials and timeseries data).
+    '''
+
+    def __init__(self,
+                 mice: str | list[str],
+                 add_cols: dict[set] = {},
+                 **kwargs):
+
+        super().__init__(mice, add_cols=add_cols, **kwargs)
+
+        self.ts_add_cols = add_cols.get('ts', set())
+        self.ts = pd.DataFrame()
+
+    def load_data(self):
+
+        # Load all data.
+        if not isinstance(self.mice, list):
+            self.mouse_ = self.mice
+            multi_sessions = self.read_multi_sessions(self.qc_params)
+            self.ts = multi_sessions.get('ts')
+            self.trials = multi_sessions.get('trials')
+        else:
+            multi_mice = self.read_multi_mice(self.qc_params, keys=['trials', 'ts'])
+            # Store data from multi_mice as attributes of dataset.
+            self.ts = multi_mice.get('ts')
+            self.trials = multi_mice.get('trials')
+        print(f'{self.trials.Session.nunique()} total sessions loaded in')
+
+        self.trials = bf.order_sessions(self.trials)
+
+        # Some validation steps on loaded data.
+        self.check_event_order()
+
+        # Downcast datatypes to make more memory efficient.
+        self.downcast_dtypes()
+        gc.collect()
+
+    def set_timeseries_path(self):
+        '''Set path to timeseries data file.'''
+        file_path = self.set_session_path()
+        ts_path = file_path / f'{self.mouse_}_analog_filled.csv'
+        return ts_path
+
+    def define_ts_dtypes(self):
+
         ts_dtypes = {
             'nTrial': np.float32,
             'iBlock': np.float32,
@@ -95,35 +454,41 @@ class HFDataset(Dataset):
             'trial_clock': 'float'
         }
 
-        return trial_dtypes, ts_dtypes
+        if self.user != 'celia':  # updated naming of session column
+            ts_dtypes['Session'] = ts_dtypes.pop('session')
 
-    def load_session_data(self):
+        return ts_dtypes
+
+    def define_ts_cols(self):
+
+        ts_dtypes = self.define_ts_dtypes()
+        usecols = list(ts_dtypes.keys())
+        usecols.extend(list(self.ts_add_cols))
+        usecols = list(set(usecols))
+        return ts_dtypes, usecols
+
+    def load_ts_data(self):
         '''Loads data from single session'''
-        trials_path = self.set_trials_path()
         ts_path = self.set_timeseries_path()
 
-        if not (ts_path.exists() & trials_path.exists()):
+        if not ts_path.exists():
             if self.verbose:
                 print(f'skipped {self.mouse_} {self.session_}')
-            return None, None
+            return None
 
-        trial_dtypes, ts_dtypes = self.define_data_dtypes()
-
-        usecols = list(trial_dtypes.keys())
-        trials = pd.read_csv(trials_path, index_col=None, dtype=trial_dtypes,
-                             usecols=usecols)
-
-        usecols = list(ts_dtypes.keys())
+        ts_dtypes, usecols = self.define_ts_cols()
 
         # Load timeseries data but be forgiving about missing columns.
         while usecols:
             try:
-                ts = pd.read_csv(ts_path, index_col=None,
-                                 usecols=usecols, dtype=ts_dtypes)
+                ts = (pd.read_parquet(ts_path, columns=usecols)
+                        .astype(ts_dtypes))
+                # ts = pd.read_csv(ts_path, index_col=None,
+                #                  usecols=usecols, dtype=ts_dtypes)
                 # Create session column to match across dataframes.
                 if 'session' in ts.columns:
                     ts = ts.rename(columns={'session': 'Session'})
-                return ts, trials
+                return ts
             except ValueError as e:
                 # Extract the missing column name from the error message.
                 re_match = [re.search(r'\((.*?)\)|"(.*?)"', str(e)),
@@ -142,7 +507,11 @@ class HFDataset(Dataset):
                     # In the case we can't find missing column.
                     raise e
         raise ValueError('All specified columns missing from parquet file.')
-        # return ts, trials
+
+    def load_session_data(self):
+        trials = self.load_trial_data()
+        ts = self.load_ts_data()
+        return trials, ts
 
     def read_multi_sessions(self,
                             qc_params,
@@ -157,18 +526,19 @@ class HFDataset(Dataset):
             if self.verbose: print(session_date)
             self.session_ = session_date
 
-            ts, trials = self.load_session_data()
-            if ts is None:
-                continue
-
+            trials, ts = self.load_session_data()
+            if ts is None: continue
             trials, ts = self.custom_update_columns(trials, ts)
             trials, ts = self.update_columns(trials, ts)
+            trials, ts = self.custom_dataset_pp(trials, ts, **kwargs)
+            if ts is None: continue
 
             # Trial level quality control needs to come at the end.
             trials_matched = qc.QC_included_trials(ts,
                                                    trials,
-                                                   allow_discontinuity=False,
-                                                   drop_enlP=False)
+                                                   allow_discontinuity=False)
+
+            trials_matched = self.cleanup_cols(trials_matched)
 
             multi_sessions = self.concat_sessions(sub_sessions=trials_matched,
                                                   full_sessions=multi_sessions)
@@ -182,13 +552,60 @@ class HFDataset(Dataset):
         return multi_sessions
 
     def check_event_order(self):
-        '''No need for only trial-based data.'''
-        pass
 
-    def downcast_dtypes(self):
+        '''
+        Test to ensure no events appear to occur out of task-defined trial
+        order. Note, it's expected that a few edge cases may be given the wrong
+        trial ID. This seems to only happen for ENLPs that happen at trial time
+        of 0 (assigned to preceding trial. They can be  dealt with, but any
+        other cases should raise an alarm.
+        '''
 
-        self.trials = downcast_all_numeric(self.trials)
-        self.trials = cast_object_to_category(self.trials)
+        trial_event_order = {
+            'ENLP': 1,
+            'state_ENLP': 1,
+            'CueP': 1,
+            'state_CueP': 1,
+            'ENL': 2,
+            'Cue': 3,
+            'Select': 4,
+            'Consumption': 5
+        }
+
+        ts = self.ts.copy()
+        ts['event_order'] = np.nan
+
+        for event, val in trial_event_order.items():
+            if event not in ts.columns: continue
+            ts.loc[ts[event] == 1, 'event_order'] = val
+
+        # Should be monotonic increase. Any events out of order get flagged.
+        out_of_order = (ts.dropna(subset='event_order')
+                        .groupby('nTrial', observed=True)['event_order']
+                        .diff() < 0)
+
+        ooo = ts.loc[out_of_order[out_of_order].index]
+        ooo_trials = ooo.nTrial.unique()
+
+        ts['flag_ooo'] = np.nan
+        ts.loc[ooo.index, 'flag_ooo'] = 1
+        post_ooo = (ts
+                    .query('nTrial.isin(@ooo_trials)')
+                    .groupby('nTrial')['flag_ooo']
+                    .ffill(1)
+                    .sum())
+        assert (ooo['ENLP'].all()) & (~any(ooo[['Cue', 'Select', 'Consumption', 'ENL']].any())), (
+               'events out of order beyond ENLP edge cases')
+        assert post_ooo == len(ooo), (
+            'rows out of order following ENLP edge cases')
+
+        # Replace mistrialed events with NaNs (because fixing timing tricky
+        # and these are very rare).
+        self.ts.loc[ooo.index, 'ENLP'] = np.nan
+
+    def custom_update_columns(self, trials, ts):
+        '''Column updates that are dataset-specific.'''
+        return trials, ts
 
     def update_columns(self, trials, ts):
 
@@ -206,131 +623,55 @@ class HFDataset(Dataset):
         ts = bf.split_penalty_states(ts, penalty='CueP')
         ts = bf.split_penalty_states(ts, penalty='CueP', cuep_ref_enl=True)
 
+        if 'trial_clock' not in ts.columns:
+            ts['trial_clock'] = 1 / ts['fs']
+            ts['trial_clock'] = ts.groupby('nTrial', observed=True)['trial_clock'].cumsum()
+        else:
+            if self.__class__.__name__ == 'HFDataset':  # Behavior only timeseries ok
+                return trials, ts
+            # print(ts.columns)
+            assert ts['fs'].iloc[0] is not None, 'need sampling freq to add trial clock'
+            ts['trial_clock'] = ts.groupby('nTrial').cumcount() * 1/ts['fs'].iloc[0]
+
+        assert sum(ts['trial_clock'].diff() < 0) == (ts.nTrial.nunique() - 1), (
+            'trial_clock is incorrect')
+
         return trials, ts
 
+    def custom_dataset_pp(self, trials, ts, **kwargs):
 
-class HFTrials(HFDataset):
+        return trials, ts
 
-    def __init__(self,
-                 mice: str | list[str],
-                 **kwargs):
+    def cleanup_cols(self, df_dict):
 
-        super().__init__(mice, **kwargs)
+        '''Remove unnecessary columns to minimize memory usage.'''
 
-    def update_columns(self, trials):
+        # Drop columns that aren't typically accessed for analysis but were
+        # necessary for preprocessing.
+        cols_to_drop = {'state_ENL_preCueP', 'state_CueP', 'state_ENLP',
+                        'stateConsumption', 'CueP', 'iLick', 'ILI',
+                        'bout_group', 'cons_bout'
+                        } & set(df_dict['ts'].columns)
+        cols_to_drop = list(cols_to_drop - self.ts_add_cols)
+        df_dict['ts'] = df_dict['ts'].drop(columns=cols_to_drop)
 
-        '''
-        Column updates (feature definitions, etc.) that should apply to all
-        datasets.
-        '''
-        # Check for state labeling consistency.
-        trials = bf.match_state_left_right(trials)
-        trials = bf.add_behavior_cols(trials)
-        # trials = trials.rename(columns={'-1reward': 'prev_rew'})
+        cols_to_drop = {'k1', 'k2', 'k3', '+1seq2', 'RL_seq2', 'RL_seq3',
+                        '-1seq3', '+1seq3',
+                        } & set(df_dict['trials'].columns)
+        col_to_drop = list(cols_to_drop - self.trls_add_cols)
+        df_dict['trials'] = df_dict['trials'].drop(columns=col_to_drop)
 
-        return trials
+        gc.collect()
 
-    def custom_update_columns(self, trials):
-        '''Column updates that are dataset-specific.'''
-        return trials
+        return df_dict
 
-    def set_timeseries_path(self):
-        '''Set path to timeseries data file.'''
-        pass
-
-    def load_session_data(self):
-        '''Loads data from single session'''
-        trials_path = self.set_trials_path()
-        if not trials_path.exists():
-            if self.verbose: print(f'skipped {self.mouse_} {self.session_}')
-            return None
-        trials = pd.read_csv(trials_path, index_col=0)
-        return trials
-
-    def get_max_trial(self, full_sessions: dict) -> int:
+    def downcast_dtypes(self):
 
         '''
-        Get maximum trial ID to use for unique trial ID assignment.
-        Importantly, also confirm that max trial matches between dataframes.
-
-        Args:
-            full_sessions:
-                Dictionary containing and trial- and timeseries-based data.
-
-        Returns:
-            max_trial:
-                Number corresponding to maximum trial value.
+        Downcast columns in trial and timeseries dataframes by datatype if
+        possible.
         '''
-
-        try:
-            max_trial_trials = full_sessions['trials'].nTrial.max()
-            max_trial = max_trial_trials
-        except AttributeError:
-            max_trial = 0
-
-        return max_trial
-
-    def read_multi_mice(self,
-                        qc_params,
-                        **kwargs):
-
-        '''
-        Load in sessions by mouse and concatenate into one large dataframe
-        keeping every trial id unique.
-
-        Args:
-            mice:
-                List of mice from which to load data.
-            root:
-                Path to root directory containing Mouse data folder.
-
-        Returns:
-            multi_mice (dict):
-                {'trials': trials data, 'timeseries': timeseries data}
-        '''
-
-        multi_mice = {key: pd.DataFrame() for key in ['trials']}
-
-        for mouse in self.mice:
-
-            self.mouse_ = mouse
-
-            multi_sessions = self.read_multi_sessions(qc_params, **kwargs)
-
-            if len(multi_sessions.get('trials')) < 1:
-                continue  # skip mouse if no sessions returned
-
-            multi_mice = self.concat_sessions(sub_sessions=multi_sessions,
-                                              full_sessions=multi_mice)
-
-        self.trials = multi_mice.get('trials')
-        print(f'{self.trials.Session.nunique()} total sessions loaded in')
-
-    def read_multi_sessions(self,
-                            qc_params,
-                            **kwargs) -> dict:
-
-        sessions = self.sessions_to_load(**qc_params)
-        multi_sessions = {key: pd.DataFrame() for key in ['trials']}
-
-        # Loop through files to be processed
-        for session_date in tqdm(sessions, self.mouse_, disable=False):
-
-            if self.verbose: print(session_date)
-            self.session_ = session_date
-
-            trials = self.load_session_data()
-            if trials is None: continue
-            trials = self.custom_update_columns(trials)
-            trials = self.update_columns(trials)
-            multi_sessions = self.concat_sessions(sub_sessions={'trials': trials},
-                                                  full_sessions=multi_sessions)
-
-        # TODO: QC all mice sessions by ENL penalty rate set per mouse
-
-        return multi_sessions
-
-    def get_sampling_freq(self):
-
-        '''Lazy workaround for inheriting from timeseries dataset'''
-        pass
+        self.trials = downcast_all_numeric(self.trials)
+        self.ts = downcast_all_numeric(self.ts)
+        self.ts = cast_object_to_category(self.ts)
+        self.trials = cast_object_to_category(self.trials)
