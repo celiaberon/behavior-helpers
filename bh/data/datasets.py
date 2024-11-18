@@ -15,8 +15,9 @@ sys.path.append(f'{os.path.expanduser("~")}/GitHub/neural-timeseries-analysis/')
 
 import nta.preprocessing.quality_control as qc
 from nta.features import behavior_features as bf
-from nta.utils import (cast_object_to_category, downcast_all_numeric,
-                       load_config_variables)
+
+from ..utils import (cast_object_to_category, downcast_all_numeric,
+                     load_config_variables)
 
 
 class HFTrials(ABC):
@@ -451,7 +452,7 @@ class HFDataset(HFTrials):
             'outcome_licks': np.int8,
             'Consumption': np.int8,
             'state_ENLP': np.int8,
-            'trial_clock': 'float'
+            # 'trial_clock': 'float'
         }
 
         if self.user != 'celia':  # updated naming of session column
