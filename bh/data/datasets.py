@@ -482,10 +482,12 @@ class HFDataset(HFTrials):
         # Load timeseries data but be forgiving about missing columns.
         while usecols:
             try:
-                ts = (pd.read_parquet(ts_path, columns=usecols)
-                        .astype(ts_dtypes))
-                # ts = pd.read_csv(ts_path, index_col=None,
-                #                  usecols=usecols, dtype=ts_dtypes)
+                if ts_path.suffix == '.csv':
+                    ts = pd.read_csv(ts_path, index_col=None,
+                                     usecols=usecols, dtype=ts_dtypes)
+                elif ts_path.suffix == '.gzip':
+                    ts = (pd.read_parquet(ts_path, columns=usecols)
+                          .astype(ts_dtypes))
                 # Create session column to match across dataframes.
                 if 'session' in ts.columns:
                     ts = ts.rename(columns={'session': 'Session'})
@@ -625,10 +627,15 @@ class HFDataset(HFTrials):
         ts = bf.split_penalty_states(ts, penalty='CueP', cuep_ref_enl=True)
 
         if 'trial_clock' not in ts.columns:
+            if 'PhotometryDataset' not in [b.__name__ for b in self.__class__.__bases__]:
+                fs = 200
+                assert np.allclose(fs, 1 / ts['session_clock'].diff()[1], atol=0.01)
+                ts['fs'] = ts.get('fs', fs)
             ts['trial_clock'] = 1 / ts['fs']
             ts['trial_clock'] = ts.groupby('nTrial', observed=True)['trial_clock'].cumsum()
         else:
-            if self.__class__.__name__ == 'HFDataset':  # Behavior only timeseries ok
+            if 'HFDataset' in [b.__name__ for b in self.__class__.__bases__]:
+                # Behavior only timeseries ok if trial_clock already exists
                 return trials, ts
             # print(ts.columns)
             assert ts['fs'].iloc[0] is not None, 'need sampling freq to add trial clock'
