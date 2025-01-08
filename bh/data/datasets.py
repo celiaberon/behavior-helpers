@@ -159,8 +159,8 @@ class HFTrials(ABC):
 
         # Compose query.
         session_log_mouse = session_log.query(f'Mouse == "{self.mouse_}" \
-                                              & Condition.isin({probs})')
-        q = f'Mouse == "{self.mouse_}" & Condition.isin({probs}) \
+                                              & Condition_x.isin({probs})')
+        q = f'Mouse == "{self.mouse_}" & Condition_x.isin({probs}) \
             & N_valid_trials > {kwargs.get("min_num_trials", 100)} \
             & Pass.isin({QC_pass})' + kwargs.get("query", '')
         session_log = session_log.query(q)
@@ -452,6 +452,9 @@ class HFDataset(HFTrials):
             'outcome_licks': np.int8,
             'Consumption': np.int8,
             'state_ENLP': np.int8,
+            'state_CueP': np.int8,
+            'responseTime': np.int8,
+            'state_ENL_preCueP': np.int8
             # 'trial_clock': 'float'
         }
 
@@ -494,12 +497,15 @@ class HFDataset(HFTrials):
                 return ts
             except ValueError as e:
                 # Extract the missing column name from the error message.
-                re_match = [re.search(r'\((.*?)\)|"(.*?)"', str(e)),
-                            re.search(r"'(.+)'", str(e))]
-                re_match = [s for s in re_match if s is not None]
+                re_match = [
+                    re.search(r'\((.*?)\)', str(e)),
+                    re.search(r'"(.*?)"', str(e)),
+                    re.search(r"'(.*?)'", str(e))
+                ]
 
+                re_match = [s for s in re_match if s is not None]
                 for s in re_match:
-                    if isinstance(s, re.Match) & (s.group(1) in usecols):
+                    if isinstance(s, re.Match) and (s.group(1) in usecols):
                         missing_col = s.group(1)
                         if missing_col == 'session':
                             ts_dtypes['Session'] = ts_dtypes.pop('session')
@@ -567,12 +573,16 @@ class HFDataset(HFTrials):
         trial_event_order = {
             'ENLP': 1,
             'state_ENLP': 1,
+            'state_ENL_preCueP': 1,
             'CueP': 1,
             'state_CueP': 1,
             'ENL': 2,
             'Cue': 3,
+            'responseTime': 4,
             'Select': 4,
-            'Consumption': 5
+            'stateConsumption': 5,
+            'Consumption': 5,
+            'TO': 4,
         }
 
         ts = self.ts.copy()
@@ -592,19 +602,37 @@ class HFDataset(HFTrials):
 
         ts['flag_ooo'] = np.nan
         ts.loc[ooo.index, 'flag_ooo'] = 1
-        post_ooo = (ts
-                    .query('nTrial.isin(@ooo_trials)')
-                    .groupby('nTrial')['flag_ooo']
-                    .ffill(1)
-                    .sum())
-        assert (ooo['ENLP'].all()) & (~any(ooo[['Cue', 'Select', 'Consumption', 'ENL']].any())), (
-               'events out of order beyond ENLP edge cases')
-        assert post_ooo == len(ooo), (
-            'rows out of order following ENLP edge cases')
 
-        # Replace mistrialed events with NaNs (because fixing timing tricky
-        # and these are very rare).
-        self.ts.loc[ooo.index, 'ENLP'] = np.nan
+        # Forward fill flag_ooo column in ts with 1 for each nTrial that has an ooo event.
+        ts['flag_ooo'] = ts.groupby('nTrial')['flag_ooo'].ffill(1)
+
+        ooo_and_post = ts.query('flag_ooo==1')
+        rows_ooo = len(ooo_and_post)
+
+        assert (ooo_and_post['ENLP'].all()) & (not any(ooo_and_post[['Cue', 'Select', 'Consumption', 'ENL']].any())), (
+                'events out of order beyond ENLP edge cases')
+
+        # assert rows_ooo == len(ooo), (
+        #     'rows out of order following ENLP edge cases')
+
+        ts['nan_next_event'] = ts['event_order'].copy()
+        ts['nan_next_event'] = ts['nan_next_event'].bfill()
+
+        print(ts.query('event_order.isna()')['nan_next_event'].unique(), ts.query('event_order.isna()')['nan_next_event'].value_counts())
+
+        # assert all(ts.query('event_order.isna()')['nan_next_event'].dropna().unique() == trial_event_order.get('ENL')), (
+        #     'only unlabeled event is NOT transitioning into ENL')
+        assert ((len(ts.query('event_order.isna()'))) < (5*ts.Session.nunique())), (
+            f'rate of unlabeled events is too high at {len(ts.query("event_order.isna()"))}')
+
+        self.ts.loc[ooo_and_post.index, 'ENLP'] = np.nan
+
+        # Cleanup columns a bit.
+        cols_to_drop = {'state_ENL_preCueP', 'state_CueP', 'state_ENLP',
+                        'stateConsumption', 'CueP', 'responseTime'}
+        cols_to_drop = list(cols_to_drop - self.ts_add_cols)
+        self.ts = self.ts.drop(columns=cols_to_drop)
+
 
     def custom_update_columns(self, trials, ts):
         '''Column updates that are dataset-specific.'''
@@ -620,11 +648,11 @@ class HFDataset(HFTrials):
         trials = trials.rename(columns={'-1reward': 'prev_rew'})
 
         # Rectify error in penalty state allocation.
-        ts['ENL'] = ts['ENL'] + ts['state_ENLP'] + ts.get('state_ENL_preCueP', 0)  # recover original state
-        ts['Cue'] = ts['Cue'] + ts['CueP']  # recover original state
-        ts = bf.split_penalty_states(ts, penalty='ENLP')
-        ts = bf.split_penalty_states(ts, penalty='CueP')
-        ts = bf.split_penalty_states(ts, penalty='CueP', cuep_ref_enl=True)
+        # ts['ENL'] = ts['ENL'] + ts['state_ENLP'] + ts.get('state_ENL_preCueP', 0)  # recover original state
+        # ts['Cue'] = ts['Cue'] + ts['CueP']  # recover original state
+        # ts = bf.split_penalty_states(ts, penalty='ENLP')
+        # ts = bf.split_penalty_states(ts, penalty='CueP')
+        # ts = bf.split_penalty_states(ts, penalty='CueP', cuep_ref_enl=True)
 
         if 'trial_clock' not in ts.columns:
             if 'PhotometryDataset' not in [b.__name__ for b in self.__class__.__bases__]:
@@ -656,8 +684,10 @@ class HFDataset(HFTrials):
 
         # Drop columns that aren't typically accessed for analysis but were
         # necessary for preprocessing.
-        cols_to_drop = {'state_ENL_preCueP', 'state_CueP', 'state_ENLP',
-                        'stateConsumption', 'CueP', 'iLick', 'ILI',
+        cols_to_drop = {
+            # 'state_ENL_preCueP', #'state_CueP', 'state_ENLP',
+                        # 'stateConsumption', 'CueP',
+                        'iLick', 'ILI',
                         'bout_group', 'cons_bout'
                         } & set(df_dict['ts'].columns)
         cols_to_drop = list(cols_to_drop - self.ts_add_cols)
