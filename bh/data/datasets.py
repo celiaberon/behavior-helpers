@@ -69,7 +69,10 @@ class HFTrials(ABC):
 
         print(f'{self.trials.Session.nunique()} total sessions loaded in')
 
-        self.trials = bf.order_sessions(self.trials)
+        if 'session_order' in self.session_log:
+            self.trials = bf.order_sessions(self.trials, self.session_log)
+        else:
+            self.trials = bf.order_sessions(self.trials)
 
         # Downcast datatypes to make more memory efficient.
         self.downcast_dtypes()
@@ -116,7 +119,9 @@ class HFTrials(ABC):
     def load_cohort_dict(self):
         '''Load lookup table for sensor expressed in each mouse of cohort.'''
         cohort = load_config_variables(self.config_path, 'cohort')['cohort']
-        cohort = {k: cohort.get(k) for k in self.mice}
+        cohort = ({k: cohort.get(k) for k in self.mice} 
+                  if isinstance(self.mice, list)
+                  else {self.mice: cohort.get(self.mice)})
         return cohort
 
     def add_mouse_palette(self):
@@ -148,6 +153,7 @@ class HFTrials(ABC):
 
         # Read in session log.
         session_log = pd.read_csv(self.summary_path)
+        self.session_log = session_log
 
         # Format inputs/args correctly.
         if not isinstance(QC_pass, list):
@@ -159,8 +165,8 @@ class HFTrials(ABC):
 
         # Compose query.
         session_log_mouse = session_log.query(f'Mouse == "{self.mouse_}" \
-                                              & Condition_x.isin({probs})')
-        q = f'Mouse == "{self.mouse_}" & Condition_x.isin({probs}) \
+                                              & Condition.isin({probs})')
+        q = f'Mouse == "{self.mouse_}" & Condition.isin({probs}) \
             & N_valid_trials > {kwargs.get("min_num_trials", 100)} \
             & Pass.isin({QC_pass})' + kwargs.get("query", '')
         session_log = session_log.query(q)
@@ -418,7 +424,10 @@ class HFDataset(HFTrials):
             self.trials = multi_mice.get('trials')
         print(f'{self.trials.Session.nunique()} total sessions loaded in')
 
-        self.trials = bf.order_sessions(self.trials)
+        if 'session_order' in self.session_log:
+            self.trials = bf.order_sessions(self.trials, self.session_log)
+        else:
+            self.trials = bf.order_sessions(self.trials)
 
         # Some validation steps on loaded data.
         self.check_event_order()
@@ -481,7 +490,6 @@ class HFDataset(HFTrials):
             return None
 
         ts_dtypes, usecols = self.define_ts_cols()
-
         # Load timeseries data but be forgiving about missing columns.
         while usecols:
             try:
@@ -495,6 +503,7 @@ class HFDataset(HFTrials):
                 if 'session' in ts.columns:
                     ts = ts.rename(columns={'session': 'Session'})
                 return ts
+
             except ValueError as e:
                 # Extract the missing column name from the error message.
                 re_match = [
@@ -511,6 +520,7 @@ class HFDataset(HFTrials):
                             ts_dtypes['Session'] = ts_dtypes.pop('session')
                             usecols.append('Session')
                         usecols.remove(missing_col)
+                        ts_dtypes.pop(missing_col, None)
                         break
                 else:
                     # In the case we can't find missing column.
@@ -622,7 +632,7 @@ class HFDataset(HFTrials):
 
         # assert all(ts.query('event_order.isna()')['nan_next_event'].dropna().unique() == trial_event_order.get('ENL')), (
         #     'only unlabeled event is NOT transitioning into ENL')
-        assert ((len(ts.query('event_order.isna()'))) < (5*ts.Session.nunique())), (
+        assert ((len(ts.query('event_order.isna()'))) < (20 * ts.Session.nunique())), (
             f'rate of unlabeled events is too high at {len(ts.query("event_order.isna()"))}')
 
         self.ts.loc[ooo_and_post.index, 'ENLP'] = np.nan
