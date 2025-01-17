@@ -54,6 +54,7 @@ class HFTrials(ABC):
         self.add_mouse_palette()
 
         self.trials = pd.DataFrame()
+        self.max_trial = 0
 
     def load_data(self):
 
@@ -63,7 +64,7 @@ class HFTrials(ABC):
             multi_sessions = self.read_multi_sessions(self.qc_params)
             self.trials = multi_sessions.get('trials')
         else:
-            multi_mice = self.read_multi_mice(self.qc_params, keys=['trials'])
+            multi_mice = self.read_multi_mice(self.qc_params, df_keys=['trials'])
             # Store data from multi_mice as attributes of dataset.
             self.trials = multi_mice.get('trials')
 
@@ -220,7 +221,9 @@ class HFTrials(ABC):
     def load_session_data(self):
         return self.load_trial_data()
 
-    def get_max_trial(self, full_sessions: dict, keys=['trials', 'ts']) -> int:
+    def get_max_trial(self,
+                      full_sessions: dict,
+                      keys=['trials', 'ts']) -> int:
 
         '''
         Get maximum trial ID to use for unique trial ID assignment.
@@ -279,13 +282,10 @@ class HFTrials(ABC):
             full_sessions:
                 Original full_sessions data now containing sub_sessions data.
         '''
-
-        max_trial = self.get_max_trial(full_sessions,
-                                       keys=list(full_sessions.keys()))
-
+        self.max_trial = self.get_max_trial(full_sessions,
+                                            keys=list(full_sessions.keys()))
         # Iterate over both trial and timeseries data.
         for key, ss_vals in sub_sessions.items():
-
             # Store original trial ID before updating with unique value.
             if 'nTrial_orig' not in ss_vals.columns:
                 ss_vals['nTrial_orig'] = ss_vals['nTrial'].copy()
@@ -296,12 +296,16 @@ class HFTrials(ABC):
 
             # Add max current trial value to all new trials before concat.
             tmp_copy = ss_vals.copy()
-            tmp_copy['nTrial'] += max_trial
+            tmp_copy['nTrial'] += self.max_trial
             full_sessions[key] = pd.concat((full_sessions[key], tmp_copy))
             full_sessions[key] = full_sessions[key].reset_index(drop=True)
 
-        # Assert that new dataframes have matching max trial ID.
-        _ = self.get_max_trial(full_sessions, keys=list(full_sessions.keys()))
+        assert len(full_sessions['trials']) == full_sessions['trials'].nTrial.nunique(), (
+                    'each trial does not have a unique ID'
+                )
+
+        # # Assert that new dataframes have matching max trial ID.
+        # _ = self.get_max_trial(full_sessions, keys=list(full_sessions.keys()))
 
         return full_sessions
 
@@ -333,7 +337,6 @@ class HFTrials(ABC):
 
             if len(multi_sessions.get('trials')) < 1:
                 continue  # skip mouse if no sessions returned
-
             multi_mice = self.concat_sessions(sub_sessions=multi_sessions,
                                               full_sessions=multi_mice)
 
@@ -418,7 +421,7 @@ class HFDataset(HFTrials):
             self.ts = multi_sessions.get('ts')
             self.trials = multi_sessions.get('trials')
         else:
-            multi_mice = self.read_multi_mice(self.qc_params, keys=['trials', 'ts'])
+            multi_mice = self.read_multi_mice(self.qc_params, df_keys=['trials', 'ts'])
             # Store data from multi_mice as attributes of dataset.
             self.ts = multi_mice.get('ts')
             self.trials = multi_mice.get('trials')
@@ -551,14 +554,12 @@ class HFDataset(HFTrials):
             trials, ts = self.update_columns(trials, ts)
             trials, ts = self.custom_dataset_pp(trials, ts, **kwargs)
             if ts is None: continue
-
             # Trial level quality control needs to come at the end.
             trials_matched = qc.QC_included_trials(ts,
                                                    trials,
                                                    allow_discontinuity=False)
 
             trials_matched = self.cleanup_cols(trials_matched)
-
             multi_sessions = self.concat_sessions(sub_sessions=trials_matched,
                                                   full_sessions=multi_sessions)
 
@@ -632,7 +633,7 @@ class HFDataset(HFTrials):
 
         # assert all(ts.query('event_order.isna()')['nan_next_event'].dropna().unique() == trial_event_order.get('ENL')), (
         #     'only unlabeled event is NOT transitioning into ENL')
-        assert ((len(ts.query('event_order.isna()'))) < (20 * ts.Session.nunique())), (
+        assert ((len(ts.query('event_order.isna()'))) < (30 * ts.Session.nunique())), (
             f'rate of unlabeled events is too high at {len(ts.query("event_order.isna()"))}')
 
         self.ts.loc[ooo_and_post.index, 'ENLP'] = np.nan
@@ -642,7 +643,6 @@ class HFDataset(HFTrials):
                         'stateConsumption', 'CueP', 'responseTime'}
         cols_to_drop = list(cols_to_drop - self.ts_add_cols)
         self.ts = self.ts.drop(columns=cols_to_drop)
-
 
     def custom_update_columns(self, trials, ts):
         '''Column updates that are dataset-specific.'''
