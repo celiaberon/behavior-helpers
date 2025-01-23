@@ -116,6 +116,7 @@ def calc_conditional_probs(trials: pd.DataFrame,
 
 def plot_sequences(cond_probs: pd.DataFrame,
                    overlay: pd.DataFrame = None,
+                   yval: str = 'pevent',
                    **kwargs):
 
     '''
@@ -135,9 +136,7 @@ def plot_sequences(cond_probs: pd.DataFrame,
             palette='deep')
 
     overlay_label = kwargs.get('overlay_label', '')
-    yval = kwargs.get('yval', 'pevent')
     hue = kwargs.get('hue', [])
-
     if kwargs.get('ax', None) is None:
         # fig, ax = plt.subplots(figsize=(6, 3), layout='constrained')
         if cond_probs.history.nunique() < 10:
@@ -222,8 +221,12 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
         # Point size as function of number of points.
         kwargs['size'] = np.min((5, 20 / cond_probs[grp].nunique()))
 
-    sns.swarmplot(data=cond_probs.sort_values(by=grp), x='history', y=yval,
-                  ax=ax, hue=grp, **kwargs)
+    if cond_probs[grp].nunique() <= 12:
+        sns.swarmplot(data=cond_probs.sort_values(by=grp), x='history', y=yval,
+                      ax=ax, hue=grp, **kwargs)
+    else:
+        sns.stripplot(data=cond_probs.sort_values(by=grp), x='history', y=yval,
+                      ax=ax, hue=grp, **kwargs)
 
     ax.legend(bbox_to_anchor=(1, 1), loc='upper left', frameon=False)
     ax.set(ylim=(0, 1))
@@ -236,7 +239,7 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
                             htrials: int = 1,
                             pred_col: str = '+1switch',
                             grp: str = 'Mouse',
-                            ax = None,
+                            ax=None,
                             **kwargs):
 
     '''
@@ -249,7 +252,7 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
     pooled_policies = calc_conditional_probs(trials,
                                              htrials,
                                              pred_col=pred_col,
-                                             sortby='history' if any(x_histories)
+                                             sortby='history' if np.any(x_histories)
                                                     else 'pevent',
                                              order=x_histories)
     x_histories = pooled_policies.history.values
@@ -266,7 +269,7 @@ def plot_seq_bar_and_points(trials: pd.DataFrame,
     fig, ax = plot_sequence_points(grp_policies, fig=fig, ax=ax, grp=grp,
                                    **kwargs)
 
-    return fig, ax
+    return fig, ax, grp_policies
 
 
 def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock',
