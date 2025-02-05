@@ -221,7 +221,7 @@ def plot_sequence_points(cond_probs: pd.DataFrame,
         # Point size as function of number of points.
         kwargs['size'] = np.min((5, 20 / cond_probs[grp].nunique()))
 
-    if cond_probs[grp].nunique() <= 12:
+    if cond_probs[grp].nunique() <= 10:
         sns.swarmplot(data=cond_probs.sort_values(by=grp), x='history', y=yval,
                       ax=ax, hue=grp, **kwargs)
     else:
@@ -419,7 +419,8 @@ def calc_bpos_probs(trials: pd.DataFrame,
     agg_funcs = {agg_col: 'mean' for agg_col in agg_cols}
 
     # Add column tracking how far trial is from end of block.
-    trials['rev_iInBlock'] = trials['iInBlock'] - trials['blockLength']
+    trials_ = trials.copy()
+    trials_['rev_iInBlock'] = trials_['iInBlock'] - trials_['blockLength']
 
     grp_forward = ['iInBlock']
     grp_rev = ['rev_iInBlock']
@@ -429,10 +430,10 @@ def calc_bpos_probs(trials: pd.DataFrame,
         grp_forward.extend(add_cond_cols)
         grp_rev.extend(add_cond_cols)
 
-    bpos_probs = (trials
+    bpos_probs = (trials_
                   .groupby(grp_forward, as_index=False, observed=True)
                   .agg(agg_funcs))
-    bpos_probs_rev = (trials
+    bpos_probs_rev = (trials_
                       .groupby(grp_rev, as_index=False, observed=True)
                       .agg(agg_funcs))
 
@@ -478,7 +479,7 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
                                 layout='constrained')
     else:
         axs = kwargs.pop('ax')
-        fig = None
+        fig = kwargs.pop('fig')
     if isinstance(axs, plt.Axes):
         axs = [axs]
     for i, (metric, ax_vars) in enumerate(plot_features.items()):
