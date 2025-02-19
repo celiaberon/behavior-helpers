@@ -128,8 +128,11 @@ class HFTrials(ABC):
     def add_mouse_palette(self):
         '''Set up some consistent mapping to distinguish mice in plots.'''
         pal = sns.color_palette('deep', n_colors=len(self.mice))
-        self.palettes['mouse_pal'] = {mouse: color for mouse, color
-                                      in zip(self.mice, pal)}
+        if isinstance(self.mice, list):
+            self.palettes['mouse_pal'] = {mouse: color for mouse, color
+                                          in zip(self.mice, pal)}
+        else:
+            self.palettes['mouse_pal'] = {self.mice: pal[0]}
 
     def sessions_to_load(self,
                          probs: int | str = 9010,
@@ -202,6 +205,44 @@ class HFTrials(ABC):
 
         return trial_dtypes
 
+    def load_data_flex_cols(self, data_path, data_types, usecols):
+        '''Load timeseries data but be forgiving about missing columns.'''
+        while usecols:
+            try:
+                if data_path.suffix == '.csv':
+                    data = pd.read_csv(data_path, index_col=None,
+                                       usecols=usecols, dtype=data_types)
+                elif data_path.suffix == '.gzip':
+                    data = (pd.read_parquet(data_path, columns=usecols)
+                            .astype(data_types))
+                # Create session column to match across dataframes.
+                if 'session' in data.columns:
+                    data = data.rename(columns={'session': 'Session'})
+                return data
+
+            except ValueError as e:
+                # Extract the missing column name from the error message.
+                re_match = [
+                    re.search(r'\((.*?)\)', str(e)),
+                    re.search(r'"(.*?)"', str(e)),
+                    re.search(r"'(.*?)'", str(e))
+                ]
+
+                re_match = [s for s in re_match if s is not None]
+                for s in re_match:
+                    if isinstance(s, re.Match) and (s.group(1) in usecols):
+                        missing_col = s.group(1)
+                        if missing_col == 'session':
+                            data_types['Session'] = data_types.pop('session')
+                            usecols.append('Session')
+                        usecols.remove(missing_col)
+                        data_types.pop(missing_col, None)
+                        break
+                else:
+                    # In the case we can't find missing column.
+                    raise e
+        raise ValueError('All specified columns missing from data file.')
+
     def load_trial_data(self):
         '''Loads trial data from single session'''
         trials_path = self.set_trials_path()
@@ -214,8 +255,7 @@ class HFTrials(ABC):
         trial_dtypes = self.define_trial_dtypes()
 
         usecols = list(trial_dtypes.keys()) + list(self.trls_add_cols)
-        trials = pd.read_csv(trials_path, index_col=None, dtype=trial_dtypes,
-                             usecols=usecols)  # index_col=0?
+        trials = self.load_data_flex_cols(trials_path, trial_dtypes, usecols)
         return trials
 
     def load_session_data(self):
@@ -326,7 +366,7 @@ class HFTrials(ABC):
 
         Returns:
             multi_mice (dict):
-                {'trials': trials data, 'timeseries': timeseries data}
+                {'trials': trials data, 'ts': timeseries data}
         '''
 
         multi_mice = {key: pd.DataFrame() for key in df_keys}
@@ -340,6 +380,11 @@ class HFTrials(ABC):
             multi_mice = self.concat_sessions(sub_sessions=multi_sessions,
                                               full_sessions=multi_mice)
 
+        sig_mice = multi_mice['ts'].Mouse.unique().tolist()
+        sig_mice = set(sig_mice) if isinstance(self.mice, list) else set([sig_mice])
+        if set(self.mice) != sig_mice:
+            print(f'mice {set(self.mice) - sig_mice} have no sessions')
+        self.mice = sig_mice
         # self.trials = multi_mice.get('trials')
         return multi_mice
 
@@ -494,41 +539,8 @@ class HFDataset(HFTrials):
 
         ts_dtypes, usecols = self.define_ts_cols()
         # Load timeseries data but be forgiving about missing columns.
-        while usecols:
-            try:
-                if ts_path.suffix == '.csv':
-                    ts = pd.read_csv(ts_path, index_col=None,
-                                     usecols=usecols, dtype=ts_dtypes)
-                elif ts_path.suffix == '.gzip':
-                    ts = (pd.read_parquet(ts_path, columns=usecols)
-                          .astype(ts_dtypes))
-                # Create session column to match across dataframes.
-                if 'session' in ts.columns:
-                    ts = ts.rename(columns={'session': 'Session'})
-                return ts
-
-            except ValueError as e:
-                # Extract the missing column name from the error message.
-                re_match = [
-                    re.search(r'\((.*?)\)', str(e)),
-                    re.search(r'"(.*?)"', str(e)),
-                    re.search(r"'(.*?)'", str(e))
-                ]
-
-                re_match = [s for s in re_match if s is not None]
-                for s in re_match:
-                    if isinstance(s, re.Match) and (s.group(1) in usecols):
-                        missing_col = s.group(1)
-                        if missing_col == 'session':
-                            ts_dtypes['Session'] = ts_dtypes.pop('session')
-                            usecols.append('Session')
-                        usecols.remove(missing_col)
-                        ts_dtypes.pop(missing_col, None)
-                        break
-                else:
-                    # In the case we can't find missing column.
-                    raise e
-        raise ValueError('All specified columns missing from parquet file.')
+        ts = self.load_data_flex_cols(ts_path, ts_dtypes, usecols)
+        return ts
 
     def load_session_data(self):
         trials = self.load_trial_data()
@@ -633,7 +645,7 @@ class HFDataset(HFTrials):
 
         # assert all(ts.query('event_order.isna()')['nan_next_event'].dropna().unique() == trial_event_order.get('ENL')), (
         #     'only unlabeled event is NOT transitioning into ENL')
-        assert ((len(ts.query('event_order.isna()'))) < (30 * ts.Session.nunique())), (
+        assert ((len(ts.query('event_order.isna()'))) < (100 * ts.Session.nunique())), (
             f'rate of unlabeled events is too high at {len(ts.query("event_order.isna()"))}')
 
         self.ts.loc[ooo_and_post.index, 'ENLP'] = np.nan

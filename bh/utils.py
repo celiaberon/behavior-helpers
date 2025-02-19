@@ -27,13 +27,11 @@ def load_config_variables(path_to_file: str,
     # For color palette configuration only
     import matplotlib as mpl
     cpal = mpl.cm.RdBu_r(np.linspace(0, 1, 8))
-
     if not os.path.isfile(os.path.join(path_to_file, 'plot_config.ini')):
         path_to_file = os.getcwd()
 
     config_file = configparser.ConfigParser()
     config_file.read(os.path.join(path_to_file, 'plot_config.ini'))
-
     # Create dictionary with key:value for each config item
     config_variables = {}
     for key in config_file[section]:
