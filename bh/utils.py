@@ -151,9 +151,17 @@ def convert_path_by_os(func):
     def wrapper(self, *args, **kwargs):
         path = func(self, *args, **kwargs)
         if isinstance(path, (str, Path, WindowsPath, PosixPath)):
+            # Convert to string first to handle any path type
+            path_str = str(path)
             if platform.system() == 'Windows':
                 # Convert forward slashes to backslashes for Windows
-                return WindowsPath(str(path).replace('/', '\\'))
-            return PosixPath(str(path))
+                path_str = path_str.replace('/', '\\')
+                if path_str.startswith('\\Volumes\\Neurobio\\MICROSCOPE\\'):
+                    path_str = path_str.replace('\\Volumes\\Neurobio\\MICROSCOPE\\', 'N:\\MICROSCOPE\\')
+                return WindowsPath(path_str)
+            else:
+                # For non-Windows systems, ensure forward slashes
+                path_str = path_str.replace('\\', '/')
+                return PosixPath(path_str)
         return path
     return wrapper

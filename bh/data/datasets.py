@@ -119,9 +119,14 @@ class HFTrials(ABC):
     def set_save_path(self):
         '''Set save path and create the directory.'''
         save_path = self.root / 'headfixed_DAB_data/behav_figures' / self.label
-        if not os.path.exists(os.path.join(save_path, 'metadata')):
-            os.makedirs(os.path.join(save_path, 'metadata'))
+        if not os.path.exists(self.set_metadata_path()):
+            os.makedirs(self.set_metadata_path())
         return save_path
+    
+    @convert_path_by_os
+    def set_metadata_path(self):
+
+        return self.root / 'headfixed_DAB_data/behav_figures' / self.label / 'metadata'
 
     def load_cohort_dict(self):
         '''Load lookup table for sensor expressed in each mouse of cohort.'''
