@@ -1,5 +1,7 @@
 import configparser
 import os
+import platform
+from pathlib import Path, PosixPath, WindowsPath
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -142,3 +144,16 @@ def check_leg_duplicates(ax):
     ax.legend(legend_reduced.values(), legend_reduced.keys(),
               bbox_to_anchor=(0.8, 1), edgecolor='white')
     # plt.tight_layout()
+
+
+def convert_path_by_os(func):
+    """Decorator to convert paths to appropriate format based on OS"""
+    def wrapper(self, *args, **kwargs):
+        path = func(self, *args, **kwargs)
+        if isinstance(path, (str, Path, WindowsPath, PosixPath)):
+            if platform.system() == 'Windows':
+                # Convert forward slashes to backslashes for Windows
+                return WindowsPath(str(path).replace('/', '\\'))
+            return PosixPath(str(path))
+        return path
+    return wrapper

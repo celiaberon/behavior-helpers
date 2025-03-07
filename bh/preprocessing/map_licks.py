@@ -150,4 +150,4 @@ def get_selection_licks(trials, licks):
                 selection_licks = pd.concat((selection_licks, pd.DataFrame(row).T), axis=0).sort_index()
     licks.loc[selection_licks.index.values, 'selection_lick'] = 1
 
-    return trials, licks
+    return licks

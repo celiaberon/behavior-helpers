@@ -4,7 +4,6 @@ import os
 import re
 import sys
 from abc import ABC, abstractmethod
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -16,8 +15,8 @@ sys.path.append(f'{os.path.expanduser("~")}/GitHub/neural-timeseries-analysis/')
 import nta.preprocessing.quality_control as qc
 from nta.features import behavior_features as bf
 
-from ..utils import (cast_object_to_category, downcast_all_numeric,
-                     load_config_variables)
+from ..utils import (cast_object_to_category, convert_path_by_os,
+                     downcast_all_numeric, load_config_variables)
 
 
 class HFTrials(ABC):
@@ -81,35 +80,42 @@ class HFTrials(ABC):
         gc.collect()
 
     @abstractmethod
+    @convert_path_by_os
     def set_root(self):
         '''Sets the root path for the dataset'''
         pass
 
     @abstractmethod
+    @convert_path_by_os
     def set_config_path(self):
         '''Sets the path to config file'''
         pass
 
     @abstractmethod
+    @convert_path_by_os
     def set_data_path(self):
         '''Sets the path to the session data'''
         pass
 
     @abstractmethod
+    @convert_path_by_os
     def set_data_overview_path(self):
         '''Sets the path to the csv containing session summary'''
         pass
 
+    @convert_path_by_os
     def set_session_path(self):
         '''Sets path to single session data'''
         return self.data_path / self.mouse_ / self.session_
 
+    @convert_path_by_os
     def set_trials_path(self):
         '''Set path to trial-level data file.'''
         file_path = self.set_session_path()
         trials_path = file_path / f'{self.mouse_}_trials.csv'
         return trials_path
 
+    @convert_path_by_os
     def set_save_path(self):
         '''Set save path and create the directory.'''
         save_path = self.root / 'headfixed_DAB_data/behav_figures' / self.label
@@ -246,7 +252,6 @@ class HFTrials(ABC):
     def load_trial_data(self):
         '''Loads trial data from single session'''
         trials_path = self.set_trials_path()
-
         if not trials_path.exists():
             if self.verbose:
                 print(f'skipped {self.mouse_} {self.session_}')
@@ -484,6 +489,7 @@ class HFDataset(HFTrials):
         self.downcast_dtypes()
         gc.collect()
 
+    @convert_path_by_os
     def set_timeseries_path(self):
         '''Set path to timeseries data file.'''
         file_path = self.set_session_path()
