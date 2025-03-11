@@ -390,7 +390,7 @@ class HFTrials(ABC):
             multi_mice = self.concat_sessions(sub_sessions=multi_sessions,
                                               full_sessions=multi_mice)
 
-        sig_mice = multi_mice['ts'].Mouse.unique().tolist()
+        sig_mice = multi_mice['trials'].Mouse.unique().tolist()
         sig_mice = set(sig_mice) if isinstance(self.mice, list) else set([sig_mice])
         if set(self.mice) != sig_mice:
             print(f'mice {set(self.mice) - sig_mice} have no sessions')
@@ -487,9 +487,6 @@ class HFDataset(HFTrials):
         else:
             self.trials = bf.order_sessions(self.trials)
 
-        # Some validation steps on loaded data.
-        self.check_event_order()
-
         # Downcast datatypes to make more memory efficient.
         self.downcast_dtypes()
         gc.collect()
@@ -575,6 +572,8 @@ class HFDataset(HFTrials):
             if ts is None: continue
             trials, ts = self.custom_update_columns(trials, ts)
             trials, ts = self.update_columns(trials, ts)
+            ts = self.check_event_order(ts)
+
             trials, ts = self.custom_dataset_pp(trials, ts, **kwargs)
             if ts is None: continue
             # Trial level quality control needs to come at the end.
@@ -594,7 +593,7 @@ class HFDataset(HFTrials):
 
         return multi_sessions
 
-    def check_event_order(self):
+    def check_event_order(self, ts=None):
 
         '''
         Test to ensure no events appear to occur out of task-defined trial
@@ -619,7 +618,7 @@ class HFDataset(HFTrials):
             'TO': 4,
         }
 
-        ts = self.ts.copy()
+        ts = ts if ts is not None else self.ts.copy()
         ts['event_order'] = np.nan
 
         for event, val in trial_event_order.items():
@@ -632,7 +631,7 @@ class HFDataset(HFTrials):
                         .diff() < 0)
 
         ooo = ts.loc[out_of_order[out_of_order].index]
-        ooo_trials = ooo.nTrial.unique()
+        # ooo_trials = ooo.nTrial.unique()
 
         ts['flag_ooo'] = np.nan
         ts.loc[ooo.index, 'flag_ooo'] = 1
@@ -646,26 +645,22 @@ class HFDataset(HFTrials):
         assert (ooo_and_post['ENLP'].all()) & (not any(ooo_and_post[['Cue', 'Select', 'Consumption', 'ENL']].any())), (
                 'events out of order beyond ENLP edge cases')
 
-        # assert rows_ooo == len(ooo), (
-        #     'rows out of order following ENLP edge cases')
-
         ts['nan_next_event'] = ts['event_order'].copy()
         ts['nan_next_event'] = ts['nan_next_event'].bfill()
 
         print(ts.query('event_order.isna()')['nan_next_event'].unique(), ts.query('event_order.isna()')['nan_next_event'].value_counts())
 
-        # assert all(ts.query('event_order.isna()')['nan_next_event'].dropna().unique() == trial_event_order.get('ENL')), (
-        #     'only unlabeled event is NOT transitioning into ENL')
         assert ((len(ts.query('event_order.isna()'))) < (100 * ts.Session.nunique())), (
             f'rate of unlabeled events is too high at {len(ts.query("event_order.isna()"))}')
 
-        self.ts.loc[ooo_and_post.index, 'ENLP'] = np.nan
+        ts.loc[ooo_and_post.index, 'ENLP'] = np.nan
 
         # Cleanup columns a bit.
         cols_to_drop = {'state_ENL_preCueP', 'state_CueP', 'state_ENLP',
                         'stateConsumption', 'CueP', 'responseTime'}
-        cols_to_drop = list(cols_to_drop - self.ts_add_cols)
-        self.ts = self.ts.drop(columns=cols_to_drop)
+        cols_to_drop = [col for col in (cols_to_drop - self.ts_add_cols) if col in ts.columns]
+        ts = ts.drop(columns=cols_to_drop)
+        return ts
 
     def custom_update_columns(self, trials, ts):
         '''Column updates that are dataset-specific.'''
