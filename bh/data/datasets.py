@@ -648,7 +648,8 @@ class HFDataset(HFTrials):
         ts['nan_next_event'] = ts['event_order'].copy()
         ts['nan_next_event'] = ts['nan_next_event'].bfill()
 
-        print(ts.query('event_order.isna()')['nan_next_event'].unique(), ts.query('event_order.isna()')['nan_next_event'].value_counts())
+        if self.verbose:
+            print(ts.query('event_order.isna()')['nan_next_event'].unique(), ts.query('event_order.isna()')['nan_next_event'].value_counts())
 
         assert ((len(ts.query('event_order.isna()'))) < (100 * ts.Session.nunique())), (
             f'rate of unlabeled events is too high at {len(ts.query("event_order.isna()"))}')
