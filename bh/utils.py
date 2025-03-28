@@ -165,3 +165,19 @@ def convert_path_by_os(func):
                 return PosixPath(path_str)
         return path
     return wrapper
+
+
+def convert_path_by_os_direct(path):
+    if isinstance(path, (str, Path, WindowsPath, PosixPath)):
+        path_str = str(path)
+        if platform.system() == 'Windows':
+            path_str = path_str.replace('/', '\\')
+            if path_str.startswith('\\Volumes\\Neurobio\\MICROSCOPE\\'):
+                path_str = path_str.replace('\\Volumes\\Neurobio\\MICROSCOPE\\', 'N:\\MICROSCOPE\\')
+            return WindowsPath(path_str)
+        else:
+            path_str = path_str.replace('\\', '/')
+            if path_str.startswith('N:/MICROSCOPE/'):
+                path_str = path_str.replace('N:/MICROSCOPE/', '/Volumes/Neurobio/MICROSCOPE/')
+            return PosixPath(path_str)
+    return path
