@@ -433,7 +433,6 @@ class HFTrials(ABC):
         # Check for state labeling consistency.
         trials = bf.match_state_left_right(trials)
         trials = bf.add_behavior_cols(trials)
-        # trials = trials.rename(columns={'-1reward': 'prev_rew'})
 
         return trials
 
@@ -674,7 +673,7 @@ class HFDataset(HFTrials):
 
         # Add standard set of analysis columns.
         trials, ts = bf.add_behavior_cols(trials, ts)
-        trials = trials.rename(columns={'-1reward': 'prev_rew'})
+        trials = trials.rename(columns={'-1reward': 'pReward'})
 
         # Rectify error in penalty state allocation.
         # ts['ENL'] = ts['ENL'] + ts['state_ENLP'] + ts.get('state_ENL_preCueP', 0)  # recover original state
