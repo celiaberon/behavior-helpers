@@ -385,7 +385,7 @@ def plot_single_session(trials: pd.DataFrame,
               bbox_to_anchor=(1, 1), loc='upper left', frameon=False,
               edgecolor=None, title='trial type')
 
-    return fig, ax
+    return fig, ax, session_id
 
 
 def calc_bpos_probs(trials: pd.DataFrame,
