@@ -7,9 +7,18 @@ import seaborn as sns
 
 from bh.utils import check_leg_duplicates
 
-sns.set(style='ticks', font_scale=1.0, rc={'axes.labelsize': 12,
-        'axes.titlesize': 12, 'savefig.transparent': True})
-
+sns.set_theme(style='ticks',
+    font_scale=1.0,
+    rc={'axes.labelsize': 11,
+        'axes.titlesize': 11,
+        'savefig.transparent': True,
+        'legend.title_fontsize': 11,
+        'legend.fontsize': 10,
+        'legend.borderpad': 0.2,
+        'legend.frameon': False,
+        'figure.titlesize': 11,
+        'figure.subplot.wspace': 0.1,
+        })
 
 def binomial_err(p, n):
     return np.sqrt(p * (1 - p)) / n
@@ -132,7 +141,7 @@ def plot_sequences(cond_probs: pd.DataFrame,
     '''
 
     sns.set(style='ticks', font_scale=1.0,
-            rc={'axes.labelsize': 12, 'axes.titlesize': 12},
+            rc={'axes.labelsize': 11, 'axes.titlesize': 11},
             palette='deep')
 
     overlay_label = kwargs.get('overlay_label', '')
@@ -292,13 +301,32 @@ def plot_block_seq_overview(trials, sortby='seq2', x='iInBlock',
     else:
         ax = kwargs.pop('ax')
         fig = None
+    plt.gcf().set_constrained_layout(False)
 
     sns.histplot(data=trials_, x=x, hue='seq2', ax=ax, stat='proportion',
                  bins=range(block_length + 2), multiple=multiple, linewidth=0,
                  **kwargs)
     ax.set(xticks=np.arange(block_length + 1, step=5),
            xlabel=xlabel_lut.get(x, x))
-    ax.get_legend().set(bbox_to_anchor=(1.2, 1))
+    leg = ax.get_legend()
+    if leg:
+        # Extract handles and labels
+        handles = leg.legendHandles
+        labels = [text.get_text() for text in leg.get_texts()]
+        
+        leg.remove()
+        for handle in handles:
+            handle.set_height(4)  # Smaller number = smaller height
+            handle.set_width(6) 
+
+        ax.legend(handles=handles, 
+                labels=labels,
+                bbox_to_anchor=(1.2, 0),
+                title='trial type', 
+                loc='center left',
+                fontsize=9,
+                labelspacing=0.2,  # Vertical spacing
+                handletextpad=0.4)  # Horizontal spacing
     sns.despine()
 
     return fig, ax
@@ -356,7 +384,7 @@ def plot_single_session(trials: pd.DataFrame,
     assert all(np.diff(bidx)) > 0, (
         'block transitions must monotonically increase')
 
-    fig, ax = plt.subplots(figsize=[7.5, 1.3])
+    fig, ax = plt.subplots(figsize=[4.7, 1.2])
     first_state = session.State.iloc[0].item()
     # Iterate over blocks and shade odd blocks only (left blocks).
     for bstart, bstop in zip(bidx[:-1], bidx[1:]):
@@ -374,7 +402,7 @@ def plot_single_session(trials: pd.DataFrame,
                     marker='x', ax=ax, color='k', label='timeout')
 
     ax.set(xlim=(tstart, tstop), xlabel='Trial', ylim=(-0.1, 1.1), ylabel='')
-    plt.yticks([0.05, 0.95], ['right', 'left'], va='center')
+    plt.yticks([0.05, 0.95], ['right', 'left  '], va='center')
     y = ax.get_yticklabels()
     y[1].set_backgroundcolor(shade_color)
     y[0].set_bbox(dict(facecolor='none', edgecolor='black'))
@@ -475,7 +503,7 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
     n_plots = len(plot_features.keys())
 
     if kwargs.get('ax', None) is None:
-        fig, axs = plt.subplots(ncols=n_plots, figsize=(3.6 * n_plots, 2.4),
+        fig, axs = plt.subplots(ncols=n_plots, figsize=(2.6 * n_plots, 1.8),
                                 layout='constrained')
     else:
         axs = kwargs.pop('ax')
@@ -511,7 +539,7 @@ def plot_bpos_behavior(bpos_probs: pd.DataFrame,
 
     sns.despine()
     axs[0].legend().remove()
-    axs[-1].legend(bbox_to_anchor=(1, 1), edgecolor='white')
-    check_leg_duplicates(axs[-1])
+    axs[-1].legend(bbox_to_anchor=(1.0, 1), edgecolor='white')
+    check_leg_duplicates(axs[-1], coords=(1.0, 1))
 
     return fig, axs

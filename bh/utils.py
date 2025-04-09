@@ -137,14 +137,51 @@ def reference_trials(ts_trials, trials, merge_var):
     return ts_trials_
 
 
-def check_leg_duplicates(ax):
+def check_leg_duplicates(ax, coords=(0.8, 1)):
 
     h, lab = ax.get_legend_handles_labels()
     legend_reduced = dict(zip(lab, h))
     ax.legend(legend_reduced.values(), legend_reduced.keys(),
-              bbox_to_anchor=(0.8, 1), edgecolor='white')
+              bbox_to_anchor=coords, edgecolor='white')
     # plt.tight_layout()
 
+def adjust_legend_scale(ax, patch_width=6, patch_height=4, coords=(1.0, 0), convert_labels='bool', **kwargs):
+    import matplotlib as mpl
+    leg = ax.get_legend()
+    handles = leg.legendHandles
+    labels = [text.get_text() for text in leg.get_texts()]
+
+    for handle in handles:
+        if isinstance(handle, mpl.patches.Patch):
+            handle.set_width(patch_width)
+            handle.set_height(patch_height)
+        elif isinstance(handle, mpl.lines.Line2D):
+            kwargs['handlelength'] = patch_width
+
+    if convert_labels=='bool':
+        if all(label in ['True', 'False'] for label in labels):
+            pass
+        else:
+            try:
+                labels = [bool(float(label)) for label in labels if label not in ['True', 'False']]
+            except ValueError:
+                labels = [bool(label) for label in labels if label not in ['True', 'False']]
+
+    elif convert_labels=='int':
+        labels = [int(label) for label in labels]
+    elif isinstance(convert_labels, dict):
+        labels = [convert_labels[label] for label in labels]
+
+    ax.legend(
+        handles=handles, 
+        labels=labels,
+        bbox_to_anchor=coords,
+        fontsize=9,
+        labelspacing=0.2,  # Vertical spacing
+        handletextpad=0.4, # Horizontal spacing
+        **kwargs)
+
+    return ax
 
 def convert_path_by_os(func):
     """Decorator to convert paths to appropriate format based on OS"""
