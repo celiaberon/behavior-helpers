@@ -9,14 +9,14 @@ from bh.utils import check_leg_duplicates
 
 sns.set_theme(style='ticks',
     font_scale=1.0,
-    rc={'axes.labelsize': 11,
-        'axes.titlesize': 11,
+    rc={'axes.labelsize': 10,
+        'axes.titlesize': 10,
         'savefig.transparent': True,
-        'legend.title_fontsize': 11,
+        'legend.title_fontsize': 10,
         'legend.fontsize': 10,
         'legend.borderpad': 0.2,
         'legend.frameon': False,
-        'figure.titlesize': 11,
+        'figure.titlesize': 10,
         'figure.subplot.wspace': 0.1,
         })
 
