@@ -145,7 +145,7 @@ def check_leg_duplicates(ax, coords=(0.8, 1)):
               bbox_to_anchor=coords, edgecolor='white')
     # plt.tight_layout()
 
-def adjust_legend_scale(ax, patch_width=6, patch_height=4, coords=(1.0, 0), convert_labels='bool', **kwargs):
+def adjust_legend_scale(ax, patch_width=6, patch_height=4, coords=(1.0, 0), convert_labels='bool', fontsize=9, **kwargs):
     import matplotlib as mpl
     leg = ax.get_legend()
     handles = leg.legendHandles
@@ -176,7 +176,7 @@ def adjust_legend_scale(ax, patch_width=6, patch_height=4, coords=(1.0, 0), conv
         handles=handles, 
         labels=labels,
         bbox_to_anchor=coords,
-        fontsize=9,
+        fontsize=fontsize,
         labelspacing=0.2,  # Vertical spacing
         handletextpad=0.4, # Horizontal spacing
         **kwargs)
