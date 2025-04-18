@@ -171,6 +171,8 @@ def adjust_legend_scale(ax, patch_width=6, patch_height=4, coords=(1.0, 0), conv
         labels = [int(label) for label in labels]
     elif isinstance(convert_labels, dict):
         labels = [convert_labels[label] for label in labels]
+    else:
+        pass
 
     ax.legend(
         handles=handles, 
